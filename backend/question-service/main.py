@@ -14,6 +14,11 @@ from generator import QuestionGenerator
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+try:
+    from monitoring import init_sentry; init_sentry("question-service")
+except ImportError:
+    pass
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saap:saap_pass@postgres:5432/saap_db")
 _pool = None
 

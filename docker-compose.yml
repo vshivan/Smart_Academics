@@ -30,8 +30,8 @@ services:
 
   api-gateway:
     build:
-      context: ./backend/api-gateway
-      dockerfile: Dockerfile
+      context: ./backend          # ← whole backend dir as context
+      dockerfile: api-gateway/Dockerfile
     ports:
       - "8000:8000"
     env_file: .env
@@ -45,8 +45,8 @@ services:
 
   syllabus-service:
     build:
-      context: ./backend/syllabus-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: syllabus-service/Dockerfile
     ports:
       - "8001:8001"
     env_file: .env
@@ -60,8 +60,8 @@ services:
 
   knowledge-service:
     build:
-      context: ./backend/knowledge-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: knowledge-service/Dockerfile
     ports:
       - "8002:8002"
     env_file: .env
@@ -71,8 +71,8 @@ services:
 
   question-service:
     build:
-      context: ./backend/question-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: question-service/Dockerfile
     ports:
       - "8003:8003"
     env_file: .env
@@ -84,8 +84,8 @@ services:
 
   evaluation-service:
     build:
-      context: ./backend/evaluation-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: evaluation-service/Dockerfile
     ports:
       - "8004:8004"
     env_file: .env
@@ -99,8 +99,8 @@ services:
 
   analytics-service:
     build:
-      context: ./backend/analytics-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: analytics-service/Dockerfile
     ports:
       - "8005:8005"
     env_file: .env
@@ -110,8 +110,8 @@ services:
 
   celery-worker:
     build:
-      context: ./backend/workers
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: workers/Dockerfile
     env_file: .env
     depends_on:
       postgres:
@@ -124,8 +124,8 @@ services:
 
   celery-beat:
     build:
-      context: ./backend/workers
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: workers/Dockerfile
     env_file: .env
     depends_on:
       - redis

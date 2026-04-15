@@ -1,7 +1,21 @@
+# ── analytics-service — optimized ────────────────────────────
 FROM python:3.11-slim
-RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r saap && useradd -r -g saap -d /app saap
+
 WORKDIR /app
-COPY requirements.txt .
+
+COPY analytics-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+
+COPY shared/monitoring.py ./monitoring.py
+COPY analytics-service/ .
+
+RUN chown -R saap:saap /app
+USER saap
+
+EXPOSE 8005
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]

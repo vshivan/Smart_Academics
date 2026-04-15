@@ -12,6 +12,11 @@ from tasks import process_syllabus_task
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+try:
+    from monitoring import init_sentry; init_sentry("syllabus-service")
+except ImportError:
+    pass
+
 app = FastAPI(title="Syllabus Service", version="1.0.0")
 processor = SyllabusProcessor()
 

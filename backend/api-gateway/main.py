@@ -12,6 +12,11 @@ from proxy import proxy_request
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+try:
+    from monitoring import init_sentry; init_sentry("api-gateway")
+except ImportError:
+    pass
+
 app = FastAPI(title="SAAP API Gateway", version="1.0.0", docs_url="/docs")
 
 app.add_middleware(
