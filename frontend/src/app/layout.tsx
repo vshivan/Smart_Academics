@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import TeacherBot from "@/components/TeacherBot";
 
 export const metadata: Metadata = {
   title: "SAAP — Smart Academic Automation Platform",
@@ -11,7 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-900 antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <TeacherBot />
+        </Providers>
       </body>
     </html>
   );
