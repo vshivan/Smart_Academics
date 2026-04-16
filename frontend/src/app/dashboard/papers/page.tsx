@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation } from "@tanstack/react-query";
 import { generatePaper, getPaper, editQuestion, finalizePaper } from "@/lib/api";
-import { FileText, Edit2, CheckCircle, Brain, Sliders, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, Edit2, CheckCircle, Brain, Sliders, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ function normalise(dist: Record<string, number>): Record<string, number> {
 // ── Main Page ─────────────────────────────────────────────────
 
 export default function PapersPage() {
+  const { success, error: toastError } = useToast();
   const { register, handleSubmit, watch } = useForm({
     defaultValues: { subject_id: "", exam_type: "midterm", total_marks: 50, duration_minutes: 180 },
   });
@@ -71,16 +73,21 @@ export default function PapersPage() {
       const papers = await Promise.all(data.papers.map((p: any) => getPaper(p.paper_id)));
       setGeneratedPapers(papers);
       setSelectedPaper(papers[0]);
+      success("Papers generated!", `${papers.length} paper sets ready — Set A & B.`);
     },
+    onError: () => toastError("Generation failed", "Make sure you've uploaded a syllabus for this Subject ID."),
   });
 
   const editQ = useMutation({
     mutationFn: ({ paperId, qId, data }: any) => editQuestion(paperId, qId, data),
+    onSuccess: () => success("Question updated"),
+    onError: () => toastError("Failed to update question"),
   });
 
   const finalize = useMutation({
     mutationFn: finalizePaper,
-    onSuccess: () => alert("Paper finalized and locked! ✅"),
+    onSuccess: () => success("Paper finalized!", "Locked and ready for distribution."),
+    onError: () => toastError("Failed to finalize"),
   });
 
   function onSubmit(d: any) {
@@ -304,8 +311,11 @@ export default function PapersPage() {
           disabled={generate.isPending || (mode === "custom" && !customValid)}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition flex items-center justify-center gap-2"
         >
-          <FileText size={16} />
-          {generate.isPending ? "Generating papers..." : "Generate 2 Paper Sets (A & B)"}
+          {generate.isPending ? (
+            <><RefreshCw size={16} className="animate-spin" /> Generating papers...</>
+          ) : (
+            <><FileText size={16} /> Generate 2 Paper Sets (A &amp; B)</>
+          )}
         </button>
 
         {generate.isError && (

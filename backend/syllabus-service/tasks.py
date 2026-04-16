@@ -60,11 +60,20 @@ def process_syllabus_task(self, file_id: str, file_path: str, subject_id: str, c
 
 
 def _update_file_status(file_id: str, status: str, error: str = None):
-    """Update processing status in DB (direct DB call for simplicity)."""
+    """Update processing status in DB."""
     import psycopg2
-    db_url = os.getenv("DATABASE_URL", "")
+    from urllib.parse import urlparse
+    db_url = os.getenv("DATABASE_URL", "postgresql://saap:saap_pass@postgres:5432/saap_db")
     try:
-        conn = psycopg2.connect(db_url)
+        # Parse URL explicitly so psycopg2 gets the right dbname
+        parsed = urlparse(db_url)
+        conn = psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            dbname=parsed.path.lstrip("/"),
+        )
         cur = conn.cursor()
         if error:
             cur.execute(

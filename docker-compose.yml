@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -103,6 +103,39 @@ services:
       dockerfile: analytics-service/Dockerfile
     ports:
       - "8005:8005"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  management-service:
+    build:
+      context: ./backend
+      dockerfile: management-service/Dockerfile
+    ports:
+      - "8006:8006"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  export-service:
+    build:
+      context: ./backend
+      dockerfile: export-service/Dockerfile
+    ports:
+      - "8007:8007"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  features-service:
+    build:
+      context: ./backend
+      dockerfile: features-service/Dockerfile
+    ports:
+      - "8008:8008"
     env_file: .env
     depends_on:
       postgres:

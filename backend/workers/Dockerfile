@@ -20,6 +20,8 @@ COPY shared/monitoring.py ./monitoring.py
 # Workers need syllabus-service modules for task imports
 COPY syllabus-service/pdf_extractor.py ./pdf_extractor.py
 COPY syllabus-service/nlp_pipeline.py  ./nlp_pipeline.py
+# tasks.py must be importable as both 'tasks' (celery entry) and 'syllabus_tasks'
+COPY syllabus-service/tasks.py ./syllabus_tasks.py
 COPY workers/ .
 
 RUN chown -R saap:saap /app
