@@ -158,8 +158,18 @@ class RuleEngine:
         """Map topics to question slots based on Bloom's distribution."""
         import random
         assignments = []
-        blooms_levels = list(blooms_dist.keys())
-        blooms_weights = list(blooms_dist.values())
+
+        # Fall back to default midterm distribution if empty
+        if not blooms_dist:
+            blooms_dist = EXAM_PATTERNS["midterm"].blooms_distribution
+
+        blooms_levels = [k for k, v in blooms_dist.items() if v > 0]
+        blooms_weights = [v for v in blooms_dist.values() if v > 0]
+
+        # Safety: if still empty, use uniform distribution
+        if not blooms_levels:
+            blooms_levels = ["remember", "understand", "apply"]
+            blooms_weights = [0.4, 0.4, 0.2]
 
         topic_pool = topics.copy()
         if not topic_pool:

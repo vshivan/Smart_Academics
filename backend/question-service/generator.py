@@ -59,7 +59,9 @@ class QuestionGenerator:
 
     def _generate_paper(self, topics: list[dict], pattern, config: dict) -> list[dict]:
         """Core deterministic generation."""
-        blooms_dist = config.get("blooms_distribution", pattern.blooms_distribution)
+        # Use config distribution if provided and non-empty, else fall back to pattern default
+        config_dist = config.get("blooms_distribution", {})
+        blooms_dist = config_dist if config_dist else pattern.blooms_distribution
         assignments = rule_engine.distribute_topics_to_questions(topics, pattern.sections, blooms_dist)
 
         questions = []
