@@ -1,12 +1,15 @@
 """Analytics Service — metrics, trends, performance dashboards."""
 
 import os
+import io
+import csv
 import uuid as uuid_lib
 import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 import asyncpg
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -163,4 +166,153 @@ async def submission_stats(class_id: str):
         "total": len(rows),
         "on_time": on_time,
         "late": late,
+    }
+
+
+@app.get("/analytics/{class_id}/export/csv")
+async def export_results_csv(class_id: str, session_id: str = Query(None)):
+    """Export evaluation results as CSV — works for one session or all."""
+    try:
+        uuid_lib.UUID(class_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="class_id must be a valid UUID")
+    pool = await get_pool()
+
+    if session_id:
+        rows = await pool.fetch(
+            """SELECT er.student_name, er.student_email, er.student_google_id,
+                      er.marks_awarded, er.total_marks, er.percentage,
+                      er.keyword_score, er.semantic_score, er.confidence_score,
+                      er.needs_review, er.faculty_override, er.override_marks,
+                      er.feedback, er.evaluated_at, es.assignment_title
+               FROM evaluation_results er
+               JOIN evaluation_sessions es ON er.session_id=es.id
+               WHERE es.class_id=$1 AND er.session_id=$2
+               ORDER BY er.percentage DESC""",
+            class_id, session_id
+        )
+    else:
+        rows = await pool.fetch(
+            """SELECT er.student_name, er.student_email, er.student_google_id,
+                      er.marks_awarded, er.total_marks, er.percentage,
+                      er.keyword_score, er.semantic_score, er.confidence_score,
+                      er.needs_review, er.faculty_override, er.override_marks,
+                      er.feedback, er.evaluated_at, es.assignment_title
+               FROM evaluation_results er
+               JOIN evaluation_sessions es ON er.session_id=es.id
+               WHERE es.class_id=$1
+               ORDER BY es.created_at DESC, er.percentage DESC""",
+            class_id
+        )
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=[
+        "assignment_title", "student_name", "student_email", "student_google_id",
+        "marks_awarded", "total_marks", "percentage",
+        "keyword_score", "semantic_score", "confidence_score",
+        "needs_review", "faculty_override", "override_marks",
+        "feedback", "evaluated_at"
+    ])
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({
+            "assignment_title": r["assignment_title"],
+            "student_name": r["student_name"] or "",
+            "student_email": r["student_email"] or "",
+            "student_google_id": r["student_google_id"],
+            "marks_awarded": r["marks_awarded"],
+            "total_marks": r["total_marks"],
+            "percentage": r["percentage"],
+            "keyword_score": round(float(r["keyword_score"] or 0) * 100, 1),
+            "semantic_score": round(float(r["semantic_score"] or 0) * 100, 1),
+            "confidence_score": round(float(r["confidence_score"] or 0) * 100, 1),
+            "needs_review": r["needs_review"],
+            "faculty_override": r["faculty_override"],
+            "override_marks": r["override_marks"] or "",
+            "feedback": r["feedback"] or "",
+            "evaluated_at": str(r["evaluated_at"] or ""),
+        })
+
+    buf.seek(0)
+    filename = f"results_{class_id[:8]}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@app.get("/analytics/{class_id}/bloom-coverage")
+async def bloom_coverage(class_id: str):
+    """Bloom's taxonomy coverage report — which levels are being tested."""
+    try:
+        uuid_lib.UUID(class_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="class_id must be a valid UUID")
+    pool = await get_pool()
+
+    # Get all papers for subjects in this class
+    rows = await pool.fetch(
+        """SELECT q.blooms_level, COUNT(*) as count, AVG(q.marks) as avg_marks
+           FROM questions q
+           JOIN question_papers qp ON q.paper_id=qp.id
+           JOIN classes c ON qp.subject_id=c.subject_id
+           WHERE c.id=$1
+           GROUP BY q.blooms_level""",
+        class_id
+    )
+
+    levels = ["remember", "understand", "apply", "analyze", "evaluate", "create"]
+    coverage = {level: {"count": 0, "avg_marks": 0, "percentage": 0} for level in levels}
+    total = 0
+
+    for r in rows:
+        if r["blooms_level"] in coverage:
+            coverage[r["blooms_level"]]["count"] = r["count"]
+            coverage[r["blooms_level"]]["avg_marks"] = round(float(r["avg_marks"] or 0), 2)
+            total += r["count"]
+
+    # Calculate percentages
+    for level in levels:
+        if total > 0:
+            coverage[level]["percentage"] = round(coverage[level]["count"] / total * 100, 1)
+
+    missing = [l for l in levels if coverage[l]["count"] == 0]
+    return {
+        "class_id": class_id,
+        "coverage": coverage,
+        "total_questions": total,
+        "missing_levels": missing,
+        "coverage_score": round((len(levels) - len(missing)) / len(levels) * 100, 1),
+    }
+
+
+@app.get("/analytics/{class_id}/student-risk")
+async def student_risk(class_id: str, threshold: float = Query(default=40.0)):
+    """Identify at-risk students (avg score below threshold)."""
+    try:
+        uuid_lib.UUID(class_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="class_id must be a valid UUID")
+    pool = await get_pool()
+
+    rows = await pool.fetch(
+        """SELECT er.student_google_id, er.student_name, er.student_email,
+                  AVG(er.percentage) as avg_score,
+                  COUNT(er.id) as submission_count,
+                  MIN(er.percentage) as lowest_score
+           FROM evaluation_results er
+           JOIN evaluation_sessions es ON er.session_id=es.id
+           WHERE es.class_id=$1
+           GROUP BY er.student_google_id, er.student_name, er.student_email
+           HAVING AVG(er.percentage) < $2
+           ORDER BY avg_score ASC""",
+        class_id, threshold
+    )
+
+    return {
+        "class_id": class_id,
+        "threshold": threshold,
+        "at_risk_count": len(rows),
+        "students": [dict(r) for r in rows],
     }

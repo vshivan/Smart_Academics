@@ -5,5 +5,7 @@ python-jose[cryptography]==3.3.0
 pydantic[email]==2.7.1
 python-multipart==0.0.9
 asyncpg==0.29.0
+slowapi==0.1.9
+cryptography==42.0.8
 
 sentry-sdk[fastapi]==2.3.1

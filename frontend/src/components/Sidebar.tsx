@@ -8,6 +8,7 @@ import {
   Building2, Users, Database, Layout, History,
   Download, AlertTriangle, Sliders, Bell, Globe,
   ChevronLeft, ChevronRight, LogOut, Home, Menu, X,
+  CalendarCheck, Award, Brain, Shield, MessageCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -37,6 +38,14 @@ const NAV_GROUPS = [
       { href: "/dashboard/export",        icon: Download,      label: "Export" },
       { href: "/dashboard/plagiarism",    icon: AlertTriangle, label: "Plagiarism" },
       { href: "/dashboard/calibration",   icon: Sliders,       label: "Calibration" },
+      { href: "/dashboard/templates",     icon: FileText,      label: "Templates" },
+      { href: "/dashboard/bulk-import",   icon: Users,         label: "Bulk Import" },
+      { href: "/dashboard/attendance",    icon: CalendarCheck, label: "Attendance" },
+      { href: "/dashboard/certificates",  icon: Award,         label: "Certificates" },
+      { href: "/dashboard/bloom-report",  icon: Brain,         label: "Bloom Report" },
+      { href: "/dashboard/comparative",   icon: BarChart2,     label: "Comparative" },
+      { href: "/dashboard/accreditation", icon: Shield,        label: "Accreditation" },
+      { href: "/dashboard/chatbot",       icon: MessageCircle, label: "AI Assistant" },
     ],
   },
   {

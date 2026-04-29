@@ -210,4 +210,21 @@ async def override_result(session_id: str, result_id: str, marks: float, feedbac
 async def _get_user_tokens(user_id: str) -> dict:
     pool = await get_pool()
     row = await pool.fetchrow("SELECT google_tokens FROM users WHERE id=$1", user_id)
-    return row["google_tokens"] if row else {}
+    if not row or not row["google_tokens"]:
+        return {}
+    # Decrypt tokens (stored encrypted since auth.py update)
+    try:
+        import base64, os
+        from cryptography.fernet import Fernet
+        _raw = os.getenv("TOKEN_ENCRYPTION_KEY", os.getenv("SECRET_KEY", "dev-secret-change-in-prod"))
+        _key = base64.urlsafe_b64encode(_raw.encode().ljust(32)[:32])
+        f = Fernet(_key)
+        import json
+        return json.loads(f.decrypt(row["google_tokens"].encode()).decode())
+    except Exception:
+        # Fallback: try as plain JSON (legacy)
+        try:
+            import json
+            return json.loads(row["google_tokens"]) if isinstance(row["google_tokens"], str) else dict(row["google_tokens"])
+        except Exception:
+            return {}

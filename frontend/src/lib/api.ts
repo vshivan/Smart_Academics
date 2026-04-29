@@ -139,3 +139,104 @@ export const getAnalytics = (classId: string) =>
 
 export const getPerformance = (classId: string) =>
   api.get(`/analytics/${classId}/performance`).then((r) => r.data);
+
+// ── New Analytics ─────────────────────────────────────────────
+export const exportResultsCsv = (classId: string, sessionId?: string) =>
+  api.get(`/analytics/${classId}/export/csv`, {
+    params: sessionId ? { session_id: sessionId } : {},
+    responseType: "blob",
+  }).then((r) => r.data);
+
+export const getBloomCoverage = (classId: string) =>
+  api.get(`/analytics/${classId}/bloom-coverage`).then((r) => r.data);
+
+export const getStudentRisk = (classId: string, threshold = 40) =>
+  api.get(`/analytics/${classId}/student-risk`, { params: { threshold } }).then((r) => r.data);
+
+// ── Student Portal ────────────────────────────────────────────
+export const getStudentResults = (googleId: string) =>
+  api.get(`/students/${googleId}/results`).then((r) => r.data);
+
+export const getStudentResultDetail = (googleId: string, sessionId: string) =>
+  api.get(`/students/${googleId}/results/${sessionId}`).then((r) => r.data);
+
+export const getStudentClasses = (googleId: string) =>
+  api.get(`/students/${googleId}/classes`).then((r) => r.data);
+
+// ── Attendance ────────────────────────────────────────────────
+export const createAttendanceSession = (data: object) =>
+  api.post("/attendance/sessions", data).then((r) => r.data);
+
+export const markAttendance = (sessionId: string, records: object[]) =>
+  api.post(`/attendance/sessions/${sessionId}/mark`, records).then((r) => r.data);
+
+export const getAttendance = (classId: string) =>
+  api.get(`/attendance/${classId}`).then((r) => r.data);
+
+export const getStudentAttendance = (classId: string, studentId: string) =>
+  api.get(`/attendance/${classId}/student/${studentId}`).then((r) => r.data);
+
+// ── Certificates ──────────────────────────────────────────────
+export const generateCertificate = (data: object) =>
+  api.post("/certificates/generate", data, { responseType: "blob" }).then((r) => r.data);
+
+export const listCertificates = (classId: string) =>
+  api.get(`/certificates/${classId}`).then((r) => r.data);
+
+// ── Paper Templates ───────────────────────────────────────────
+export const createPaperTemplate = (data: object) =>
+  api.post("/paper-templates", data).then((r) => r.data);
+
+export const listPaperTemplates = () =>
+  api.get("/paper-templates").then((r) => r.data);
+
+export const getPaperTemplate = (id: string) =>
+  api.get(`/paper-templates/${id}`).then((r) => r.data);
+
+// ── Bulk Import ───────────────────────────────────────────────
+export const bulkImportStudents = (classId: string, file: File) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api.post(`/bulk-import/${classId}`, fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }).then((r) => r.data);
+};
+
+export const listClassStudents = (classId: string) =>
+  api.get(`/classes/${classId}/students`).then((r) => r.data);
+
+// ── Comparative Analytics ─────────────────────────────────────
+export const compareClasses = (classIds: string[]) =>
+  api.get("/analytics/compare", { params: { class_ids: classIds.join(",") } }).then((r) => r.data);
+
+export const getSemesterTrend = (subjectId: string) =>
+  api.get(`/analytics/semester-trend/${subjectId}`).then((r) => r.data);
+
+// ── Accreditation ─────────────────────────────────────────────
+export const generateAccreditation = (reportType: string, academicYearId?: string) =>
+  api.post("/accreditation/generate", null, { params: { report_type: reportType, academic_year_id: academicYearId } }).then((r) => r.data);
+
+export const listAccreditationReports = () =>
+  api.get("/accreditation/reports").then((r) => r.data);
+
+// ── Chatbot ───────────────────────────────────────────────────
+export const sendChatMessage = (message: string, subjectId?: string, conversationId?: string) =>
+  api.post("/chatbot/message", { message, subject_id: subjectId, conversation_id: conversationId }).then((r) => r.data);
+
+// ── Co-Faculty ────────────────────────────────────────────────
+export const addCollaborator = (classId: string, facultyId: string, role = "reviewer") =>
+  api.post(`/classes/${classId}/collaborators`, { faculty_id: facultyId, role }).then((r) => r.data);
+
+export const listCollaborators = (classId: string) =>
+  api.get(`/classes/${classId}/collaborators`).then((r) => r.data);
+
+// ── RBAC ──────────────────────────────────────────────────────
+export const checkPermission = (role: string, permission: string) =>
+  api.get("/rbac/check", { params: { role, permission } }).then((r) => r.data);
+
+export const getRolePermissions = (role: string) =>
+  api.get(`/rbac/permissions/${role}`).then((r) => r.data);
+
+// ── Notifications (email/SMS) ─────────────────────────────────
+export const notifyParents = (sessionId: string) =>
+  api.post(`/notify/parents/${sessionId}`).then((r) => r.data);

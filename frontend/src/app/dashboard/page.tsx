@@ -6,6 +6,7 @@ import {
   Upload, FileText, CheckSquare, BarChart2,
   Building2, Users, Database, Layout, History,
   Download, AlertTriangle, Sliders, Bell, Globe,
+  CalendarCheck, Award, Brain, Shield, MessageCircle,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -21,6 +22,14 @@ const NAV_ITEMS = [
   { href: "/dashboard/export",        icon: Download,       label: "Export Papers",           desc: "Download formatted PDF papers",          color: "green",  group: "Features" },
   { href: "/dashboard/plagiarism",    icon: AlertTriangle,  label: "Plagiarism Check",        desc: "Detect similar submissions",             color: "orange", group: "Features" },
   { href: "/dashboard/calibration",   icon: Sliders,        label: "Difficulty Calibration",  desc: "Auto-adjust question difficulty",        color: "orange", group: "Features" },
+  { href: "/dashboard/templates",     icon: FileText,       label: "Paper Templates",         desc: "Save & reuse paper configurations",      color: "green",  group: "Features" },
+  { href: "/dashboard/bulk-import",   icon: Users,          label: "Bulk Import",             desc: "Import students from CSV",               color: "green",  group: "Features" },
+  { href: "/dashboard/attendance",    icon: CalendarCheck,  label: "Attendance",              desc: "Track student attendance",               color: "green",  group: "Features" },
+  { href: "/dashboard/certificates",  icon: Award,          label: "Certificates",            desc: "Generate student certificates",          color: "green",  group: "Features" },
+  { href: "/dashboard/bloom-report",  icon: Brain,          label: "Bloom's Report",          desc: "Coverage analysis & at-risk students",   color: "orange", group: "Features" },
+  { href: "/dashboard/comparative",   icon: BarChart2,      label: "Comparative Analytics",   desc: "Compare classes & semesters",            color: "orange", group: "Features" },
+  { href: "/dashboard/accreditation", icon: Shield,         label: "Accreditation Reports",   desc: "NBA, NAAC, NIRF report generation",      color: "purple", group: "Management" },
+  { href: "/dashboard/chatbot",       icon: MessageCircle,  label: "AI Assistant",            desc: "Ask anything about SAAP",                color: "blue",   group: "Core" },
   { href: "/dashboard/notifications", icon: Bell,           label: "Notifications",           desc: "Alerts & processing updates",            color: "orange", group: "Features" },
   { href: "/dashboard/lms",           icon: Globe,          label: "LMS Integration",         desc: "Moodle, Canvas, Teams sync",             color: "gray",   group: "Integrations" },
 ];

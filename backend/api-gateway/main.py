@@ -4,6 +4,9 @@ import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import logging
 
 from auth import router as auth_router, get_current_user
@@ -17,7 +20,12 @@ try:
 except ImportError:
     pass
 
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 app = FastAPI(title="SAAP API Gateway", version="1.0.0", docs_url="/docs")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -118,6 +126,18 @@ async def get_analytics(class_id: str, request: Request, user=Depends(get_curren
 @app.get("/analytics/{class_id}/performance")
 async def get_performance(class_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["analytics"], f"/analytics/{class_id}/performance", user)
+
+@app.get("/analytics/{class_id}/export/csv")
+async def export_csv(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["analytics"], f"/analytics/{class_id}/export/csv", user)
+
+@app.get("/analytics/{class_id}/bloom-coverage")
+async def bloom_coverage(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["analytics"], f"/analytics/{class_id}/bloom-coverage", user)
+
+@app.get("/analytics/{class_id}/student-risk")
+async def student_risk(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["analytics"], f"/analytics/{class_id}/student-risk", user)
 
 
 # ── Management routes ─────────────────────────────────────────

@@ -1,12 +1,14 @@
 """OAuth2 + JWT authentication."""
 import os
 import json
+import base64
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
 import httpx
+from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -15,18 +17,21 @@ from pydantic import BaseModel
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8  # 8 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8
 
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saap:saap_pass@postgres:5432/saap_db")
+GOOGLE_REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")
+FRONTEND_URL         = os.getenv("FRONTEND_URL", "http://localhost:3000")
+DATABASE_URL         = os.getenv("DATABASE_URL", "postgresql://saap:saap_pass@postgres:5432/saap_db")
+
+# Token encryption key — derive from SECRET_KEY if not set separately
+_raw = os.getenv("TOKEN_ENCRYPTION_KEY", SECRET_KEY)
+_key = base64.urlsafe_b64encode(_raw.encode().ljust(32)[:32])
+fernet = Fernet(_key)
 
 router = APIRouter()
 bearer_scheme = HTTPBearer()
-
-# Shared DB pool for auth service
 _pool = None
 
 
@@ -35,6 +40,17 @@ async def get_pool():
     if _pool is None:
         _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
     return _pool
+
+
+def encrypt_tokens(tokens: dict) -> str:
+    return fernet.encrypt(json.dumps(tokens).encode()).decode()
+
+
+def decrypt_tokens(encrypted: str) -> dict:
+    try:
+        return json.loads(fernet.decrypt(encrypted.encode()).decode())
+    except Exception:
+        return {}
 
 
 class TokenData(BaseModel):
@@ -132,11 +148,12 @@ async def oauth_callback(code: str):
             userinfo_resp.raise_for_status()
             userinfo = userinfo_resp.json()
 
-        # 3. Upsert user + store tokens in DB (ERR-005 fix)
+        # 3. Upsert user + store ENCRYPTED tokens in DB
         pool = await get_pool()
+        encrypted = encrypt_tokens(google_tokens)
         row = await pool.fetchrow(
             """INSERT INTO users (id, email, name, google_id, google_tokens, last_login)
-               VALUES (uuid_generate_v4(), $1, $2, $3, $4::jsonb, NOW())
+               VALUES (uuid_generate_v4(), $1, $2, $3, $4, NOW())
                ON CONFLICT (google_id) DO UPDATE SET
                    google_tokens = EXCLUDED.google_tokens,
                    name          = EXCLUDED.name,
@@ -145,7 +162,7 @@ async def oauth_callback(code: str):
             userinfo["email"],
             userinfo.get("name", ""),
             userinfo["sub"],
-            json.dumps(google_tokens),
+            encrypted,
         )
 
         user_id = str(row["id"])
