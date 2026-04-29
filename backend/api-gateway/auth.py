@@ -60,6 +60,23 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+def require_role(*allowed_roles: str):
+    """Dependency factory — raises 403 if user role not in allowed_roles."""
+    async def checker(user: TokenData = Depends(get_current_user)) -> TokenData:
+        if user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{user.role}' is not allowed. Required: {list(allowed_roles)}"
+            )
+        return user
+    return checker
+
+
+# Convenience role dependencies
+require_hod_or_admin = require_role("hod", "admin")
+require_admin        = require_role("admin")
+
+
 @router.get("/login")
 async def login():
     """Redirect browser to Google OAuth consent screen."""

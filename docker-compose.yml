@@ -141,6 +141,39 @@ services:
       postgres:
         condition: service_healthy
 
+  student-service:
+    build:
+      context: ./backend
+      dockerfile: student-service/Dockerfile
+    ports:
+      - "8009:8009"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: notification-service/Dockerfile
+    ports:
+      - "8010:8010"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  advanced-service:
+    build:
+      context: ./backend
+      dockerfile: advanced-service/Dockerfile
+    ports:
+      - "8011:8011"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   celery-worker:
     build:
       context: ./backend

@@ -29,14 +29,17 @@ app.add_middleware(
 
 # Service registry
 SERVICES = {
-    "syllabus":    os.getenv("SYLLABUS_SERVICE_URL",    "http://syllabus-service:8001"),
-    "knowledge":   os.getenv("KNOWLEDGE_SERVICE_URL",   "http://knowledge-service:8002"),
-    "questions":   os.getenv("QUESTION_SERVICE_URL",    "http://question-service:8003"),
-    "evaluation":  os.getenv("EVALUATION_SERVICE_URL",  "http://evaluation-service:8004"),
-    "analytics":   os.getenv("ANALYTICS_SERVICE_URL",   "http://analytics-service:8005"),
-    "management":  os.getenv("MANAGEMENT_SERVICE_URL",  "http://management-service:8006"),
-    "export":      os.getenv("EXPORT_SERVICE_URL",      "http://export-service:8007"),
-    "features":    os.getenv("FEATURES_SERVICE_URL",    "http://features-service:8008"),
+    "syllabus":      os.getenv("SYLLABUS_SERVICE_URL",      "http://syllabus-service:8001"),
+    "knowledge":     os.getenv("KNOWLEDGE_SERVICE_URL",     "http://knowledge-service:8002"),
+    "questions":     os.getenv("QUESTION_SERVICE_URL",      "http://question-service:8003"),
+    "evaluation":    os.getenv("EVALUATION_SERVICE_URL",    "http://evaluation-service:8004"),
+    "analytics":     os.getenv("ANALYTICS_SERVICE_URL",     "http://analytics-service:8005"),
+    "management":    os.getenv("MANAGEMENT_SERVICE_URL",    "http://management-service:8006"),
+    "export":        os.getenv("EXPORT_SERVICE_URL",        "http://export-service:8007"),
+    "features":      os.getenv("FEATURES_SERVICE_URL",      "http://features-service:8008"),
+    "student":       os.getenv("STUDENT_SERVICE_URL",       "http://student-service:8009"),
+    "notification":  os.getenv("NOTIFICATION_SERVICE_URL",  "http://notification-service:8010"),
+    "advanced":      os.getenv("ADVANCED_SERVICE_URL",      "http://advanced-service:8011"),
 }
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
@@ -237,3 +240,141 @@ async def batch_override(session_id: str, request: Request, user=Depends(get_cur
 @app.post("/calibrate/{session_id}")
 async def calibrate(session_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], f"/calibrate/{session_id}", user)
+
+
+# ── Student Portal routes ─────────────────────────────────────
+@app.get("/students/{student_google_id}/profile")
+async def student_profile(student_google_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], f"/students/{student_google_id}/profile", user)
+
+@app.get("/students/{student_google_id}/results")
+async def student_results(student_google_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], f"/students/{student_google_id}/results", user)
+
+@app.get("/students/{student_google_id}/results/{session_id}")
+async def student_result_detail(student_google_id: str, session_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], f"/students/{student_google_id}/results/{session_id}", user)
+
+@app.get("/students/{student_google_id}/classes")
+async def student_classes(student_google_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], f"/students/{student_google_id}/classes", user)
+
+@app.get("/students/{student_google_id}/certificates")
+async def student_certificates(student_google_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], f"/students/{student_google_id}/certificates", user)
+
+@app.post("/students/register")
+async def register_student(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["student"], "/students/register", user)
+
+
+# ── Notification routes ───────────────────────────────────────
+@app.post("/notify/email")
+async def send_email(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], "/email/send", user)
+
+@app.post("/notify/bulk-email")
+async def send_bulk_email(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], "/email/bulk", user)
+
+@app.post("/notify/sms")
+async def send_sms(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], "/sms/send", user)
+
+@app.post("/notify/parents/{session_id}")
+async def notify_parents(session_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], f"/sms/notify-parents/{session_id}", user)
+
+@app.post("/notify/syllabus-done")
+async def notify_syllabus_done(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], "/notify/syllabus-done", user)
+
+@app.post("/notify/evaluation-done")
+async def notify_evaluation_done(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["notification"], "/notify/evaluation-done", user)
+
+
+# ── Advanced routes ───────────────────────────────────────────
+@app.post("/paper-templates")
+async def create_template(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/paper-templates", user)
+
+@app.get("/paper-templates")
+async def list_templates(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/paper-templates", user)
+
+@app.get("/paper-templates/{template_id}")
+async def get_template(template_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/paper-templates/{template_id}", user)
+
+@app.post("/attendance/sessions")
+async def create_attendance_session(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/attendance/sessions", user)
+
+@app.post("/attendance/sessions/{session_id}/mark")
+async def mark_attendance(session_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/attendance/sessions/{session_id}/mark", user)
+
+@app.get("/attendance/{class_id}")
+async def get_attendance(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/attendance/{class_id}", user)
+
+@app.get("/attendance/{class_id}/student/{student_id}")
+async def get_student_attendance(class_id: str, student_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/attendance/{class_id}/student/{student_id}", user)
+
+@app.post("/certificates/generate")
+async def generate_certificate(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/certificates/generate", user)
+
+@app.get("/certificates/{class_id}")
+async def list_certificates(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/certificates/{class_id}", user)
+
+@app.post("/bulk-import/{class_id}")
+async def bulk_import(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/bulk-import/{class_id}", user)
+
+@app.get("/classes/{class_id}/students")
+async def list_students(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/classes/{class_id}/students", user)
+
+@app.post("/classes/{class_id}/collaborators")
+async def add_collaborator(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/classes/{class_id}/collaborators", user)
+
+@app.get("/classes/{class_id}/collaborators")
+async def list_collaborators(class_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/classes/{class_id}/collaborators", user)
+
+@app.get("/analytics/compare")
+async def compare_classes(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/analytics/compare", user)
+
+@app.get("/analytics/semester-trend/{subject_id}")
+async def semester_trend(subject_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/analytics/semester-trend/{subject_id}", user)
+
+@app.post("/accreditation/generate")
+async def generate_accreditation(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/accreditation/generate", user)
+
+@app.get("/accreditation/reports")
+async def list_accreditation(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/accreditation/reports", user)
+
+@app.post("/chatbot/message")
+async def chatbot(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/chatbot/message", user)
+
+@app.post("/questions/{question_bank_id}/predict-difficulty")
+async def predict_difficulty(question_bank_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/questions/{question_bank_id}/predict-difficulty", user)
+
+@app.get("/rbac/check")
+async def rbac_check(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/rbac/check", user)
+
+@app.get("/rbac/permissions/{role}")
+async def rbac_permissions(role: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/rbac/permissions/{role}", user)
