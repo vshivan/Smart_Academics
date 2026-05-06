@@ -6,6 +6,8 @@ WORKDIR /app
 COPY advanced-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY shared/monitoring.py ./monitoring.py
+COPY shared/response.py ./response.py
+COPY shared/cache.py ./cache.py
 COPY advanced-service/ .
 RUN chown -R saap:saap /app
 USER saap

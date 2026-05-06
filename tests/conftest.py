@@ -1,133 +1,188 @@
-"""Shared fixtures for all tests."""
+"""
+Shared pytest fixtures and configuration.
+"""
 import os
 import sys
 import pytest
 
-# Add service paths so imports work without installing packages
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend/syllabus-service"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend/question-service"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend/evaluation-service"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend/api-gateway"))
+# ── Backend module paths ───────────────────────────────────────
+# Each service exposes its modules by name; add all service dirs to sys.path.
+_BACKEND = os.path.join(os.path.dirname(__file__), "..", "backend")
+sys.path.insert(0, os.path.join(_BACKEND, "api-gateway"))       # auth, proxy, main
+sys.path.insert(0, os.path.join(_BACKEND, "shared"))            # response, cache, logging_config
+sys.path.insert(0, os.path.join(_BACKEND, "question-service"))  # rule_engine, generator
+sys.path.insert(0, os.path.join(_BACKEND, "evaluation-service")) # evaluator, classroom_client
+sys.path.insert(0, os.path.join(_BACKEND, "syllabus-service"))  # nlp_pipeline, pdf_extractor, processor
 
-# ── Sample data fixtures ──────────────────────────────────────
+# Set test environment variables before any imports
+os.environ.setdefault("SECRET_KEY",    "test-secret-key-for-unit-tests-only-32chars")
+os.environ.setdefault("DATABASE_URL",  "postgresql://saap:saap_pass@localhost:5432/saap_test")
+os.environ.setdefault("REDIS_URL",     "redis://localhost:6379/15")
+os.environ.setdefault("ENVIRONMENT",   "test")
+os.environ.setdefault("LOG_LEVEL",     "WARNING")
+os.environ.setdefault("SMTP_USER",     "")
+os.environ.setdefault("SMTP_PASS",     "")
+os.environ.setdefault("GOOGLE_CLIENT_ID",     "test-client-id")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
 
-@pytest.fixture
-def sample_syllabus_text():
-    return """
-Unit 1: Introduction to Databases
-A database is an organized collection of structured information or data.
-Topics include: define data models, list types of databases, identify DBMS components.
-Students should be able to explain the concept of normalization.
 
-Unit 2: Normalization
-Normalization is the process of organizing data to reduce redundancy.
-1NF requires atomic values. 2NF removes partial dependencies. 3NF removes transitive dependencies.
-Students should analyze, differentiate, and evaluate normal forms.
-Apply normalization to solve real-world database design problems.
-
-Unit 3: SQL and Transactions
-SQL is used to manage relational databases. Transactions ensure ACID properties.
-Design queries using SELECT, INSERT, UPDATE, DELETE.
-Evaluate transaction isolation levels and their impact on concurrency.
-"""
+# ── Fixtures ──────────────────────────────────────────────────
 
 @pytest.fixture
-def sample_knowledge_graph():
-    return {
-        "subject_id": "sub_test_001",
-        "units": [
-            {
-                "name": "Unit 1: Introduction to Databases",
-                "order": 1,
-                "topics": [
-                    {
-                        "topic_name": "data models",
-                        "topic_keywords": ["relational", "hierarchical", "network"],
-                        "blooms_levels": ["remember", "understand"],
-                    },
-                    {
-                        "topic_name": "normalization",
-                        "topic_keywords": ["1NF", "2NF", "3NF", "redundancy"],
-                        "blooms_levels": ["understand", "apply", "analyze"],
-                    },
-                ],
-            },
-            {
-                "name": "Unit 2: SQL",
-                "order": 2,
-                "topics": [
-                    {
-                        "topic_name": "SQL queries",
-                        "topic_keywords": ["SELECT", "INSERT", "UPDATE", "DELETE"],
-                        "blooms_levels": ["apply", "analyze"],
-                    },
-                ],
-            },
+def faculty_token():
+    """JWT token for a faculty user with standard permissions."""
+    from auth import create_access_token
+    return create_access_token({
+        "user_id":     "faculty-user-id",
+        "email":       "faculty@college.edu",
+        "role":        "faculty",
+        "college_id":  "test-college-id",
+        "permissions": [
+            "upload_syllabus", "generate_papers", "evaluate_assignments",
+            "view_own_analytics", "use_question_bank", "build_rubrics",
         ],
-        "version": 1,
-    }
+    })
+
 
 @pytest.fixture
-def sample_topics():
-    return [
-        {"topic_name": "normalization", "unit_name": "Unit 1", "topic_keywords": ["1NF", "2NF", "3NF"]},
-        {"topic_name": "SQL queries",   "unit_name": "Unit 2", "topic_keywords": ["SELECT", "JOIN"]},
-        {"topic_name": "transactions",  "unit_name": "Unit 2", "topic_keywords": ["ACID", "commit"]},
-        {"topic_name": "data models",   "unit_name": "Unit 1", "topic_keywords": ["relational", "ER"]},
-        {"topic_name": "indexing",      "unit_name": "Unit 3", "topic_keywords": ["B-tree", "hash"]},
-    ]
+def hod_token():
+    """JWT token for a HOD user."""
+    from auth import create_access_token
+    return create_access_token({
+        "user_id":     "hod-user-id",
+        "email":       "hod@college.edu",
+        "role":        "hod",
+        "college_id":  "test-college-id",
+        "permissions": [
+            "upload_syllabus", "generate_papers", "evaluate_assignments",
+            "view_own_analytics", "view_class_analytics", "view_dept_analytics",
+            "manage_faculty_roles", "manage_co_faculty", "use_question_bank",
+            "build_rubrics", "generate_accreditation",
+        ],
+    })
+
 
 @pytest.fixture
-def perfect_student_answer():
-    return (
-        "Normalization is the process of organizing a relational database to reduce redundancy "
-        "and improve data integrity. The first normal form (1NF) requires atomic values. "
-        "The second normal form (2NF) removes partial dependencies on the primary key. "
-        "The third normal form (3NF) eliminates transitive dependencies. "
-        "Normalization improves database design by minimizing redundancy."
-    )
+def admin_token():
+    """JWT token for an admin user with all permissions."""
+    from auth import create_access_token
+    return create_access_token({
+        "user_id":     "admin-user-id",
+        "email":       "admin@college.edu",
+        "role":        "admin",
+        "college_id":  "test-college-id",
+        "permissions": [
+            "upload_syllabus", "generate_papers", "evaluate_assignments",
+            "view_own_analytics", "view_class_analytics", "view_dept_analytics",
+            "manage_faculty_roles", "manage_co_faculty", "use_question_bank",
+            "build_rubrics", "generate_accreditation", "manage_colleges",
+            "manage_all_users",
+        ],
+    })
+
 
 @pytest.fixture
-def poor_student_answer():
-    return "Normalization is something related to databases. It makes things better."
+def student_token():
+    """JWT token for a student user."""
+    from auth import create_access_token
+    return create_access_token({
+        "user_id":     "student-user-id",
+        "email":       "student@college.edu",
+        "role":        "student",
+        "college_id":  "test-college-id",
+        "permissions": ["view_own_results", "view_own_attendance"],
+    })
+
 
 @pytest.fixture
-def empty_student_answer():
-    return ""
+def auth_headers(faculty_token):
+    """Default auth headers using faculty token."""
+    return {"Authorization": f"Bearer {faculty_token}"}
+
+
+@pytest.fixture
+def admin_headers(admin_token):
+    return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest.fixture
+def hod_headers(hod_token):
+    return {"Authorization": f"Bearer {hod_token}"}
+
+
+# ── Domain fixtures for evaluator tests ───────────────────────
 
 @pytest.fixture
 def answer_key():
     return (
-        "Normalization is the process of organizing data in a database to reduce redundancy. "
-        "1NF: atomic values, no repeating groups. "
-        "2NF: no partial dependencies on composite primary key. "
-        "3NF: no transitive dependencies. "
-        "Benefits: reduced redundancy, improved data integrity, easier maintenance."
+        "Normalization is the process of organizing a relational database to reduce data "
+        "redundancy and improve data integrity. The normal forms (1NF, 2NF, 3NF, BCNF) "
+        "define rules for eliminating redundancy. Functional dependencies are used to "
+        "identify and remove redundancy by decomposing relations."
     )
+
 
 @pytest.fixture
 def keywords():
-    return ["normalization", "1NF", "2NF", "3NF", "redundancy", "atomic", "dependency"]
+    return ["normalization", "1NF", "2NF", "3NF", "redundancy", "integrity", "dependency"]
+
+
+@pytest.fixture
+def perfect_student_answer():
+    return (
+        "Normalization is the process of organizing a relational database to minimize "
+        "redundancy and ensure data integrity. It involves applying normal forms: 1NF "
+        "ensures atomic values, 2NF removes partial dependencies, and 3NF removes "
+        "transitive dependencies. Functional dependencies guide decomposition of relations "
+        "to achieve higher normal forms. This process improves consistency and efficiency."
+    )
+
+
+@pytest.fixture
+def poor_student_answer():
+    return "I think database is good. It stores data somewhere and is useful."
+
 
 @pytest.fixture
 def sample_rubric():
     return {
         "criteria": [
-            {"name": "Definition", "keywords": ["normalization", "redundancy", "organize"], "weight": 2},
-            {"name": "Normal Forms", "keywords": ["1NF", "2NF", "3NF", "atomic"], "weight": 3},
-            {"name": "Benefits",    "keywords": ["integrity", "maintenance", "efficiency"], "weight": 1},
+            {
+                "name": "Defines Normalization",
+                "keywords": ["normalization", "redundancy", "organize"],
+                "weight": 3,
+            },
+            {
+                "name": "Explains Normal Forms",
+                "keywords": ["1NF", "2NF", "3NF", "atomic"],
+                "weight": 4,
+            },
+            {
+                "name": "Discusses Integrity",
+                "keywords": ["integrity", "consistency", "dependency"],
+                "weight": 3,
+            },
         ]
     }
 
-@pytest.fixture
-def valid_jwt_token():
-    """Generate a real JWT for testing auth."""
-    import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend/api-gateway"))
-    from auth import create_access_token
-    return create_access_token({
-        "user_id": "test_user_001",
-        "email": "faculty@test.edu",
-        "college_id": "college_001",
-        "role": "faculty",
-    })
+
+# ── Domain fixtures for NLP pipeline tests ─────────────────────
+
+@pytest.fixture(scope="module")
+def sample_syllabus_text():
+    return """
+Unit 1: Introduction to Databases
+Students should define and list the key components of database systems.
+Topics include: data models, schemas, instances, and database users.
+Students should recall the definition of DBMS and its advantages.
+
+Unit 2: Relational Model and SQL
+Students should explain and apply SQL queries to solve problems.
+Topics: normalization, functional dependencies, 1NF, 2NF, 3NF.
+Students should analyze and differentiate between normal forms.
+
+Unit 3: Transactions and Concurrency
+Students should evaluate and justify transaction management strategies.
+Topics: ACID properties, locking protocols, deadlock detection.
+Students should design concurrency control mechanisms.
+    """

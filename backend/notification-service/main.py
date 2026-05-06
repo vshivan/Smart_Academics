@@ -5,6 +5,9 @@ Notification Service — Email + SMS + In-app
 - In-app notifications (already in features-service, extended here)
 """
 import os, json, uuid, logging, smtplib
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -47,9 +50,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Notification Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "notification-service"}
+    return ok({"status": "ok", "service": "notification-service"})
 
 
 # ── Email ─────────────────────────────────────────────────────
@@ -106,7 +123,7 @@ async def send_email(body: EmailRequest, background_tasks: BackgroundTasks):
 
     # Send email in background
     background_tasks.add_task(_send_and_log, pool, nid, body)
-    return {"status": "queued", "notification_id": nid}
+    return ok({"status": "queued", "notification_id": nid})
 
 
 async def _send_and_log(pool, notification_id: str, body: EmailRequest):
@@ -150,7 +167,7 @@ async def send_bulk_email(body: BulkEmailRequest, background_tasks: BackgroundTa
         )
         sent += 1
 
-    return {"status": "queued", "recipients": sent}
+    return ok({"status": "queued", "recipients": sent})
 
 
 # ── SMS ───────────────────────────────────────────────────────
@@ -173,7 +190,7 @@ async def send_sms(body: SMSRequest, background_tasks: BackgroundTasks):
     )
 
     background_tasks.add_task(_send_sms_twilio, pool, log_id, body.to_phone, body.message)
-    return {"status": "queued", "log_id": log_id}
+    return ok({"status": "queued", "log_id": log_id})
 
 
 async def _send_sms_twilio(pool, log_id: str, to_phone: str, message: str):
@@ -233,7 +250,7 @@ async def notify_parents(session_id: str, background_tasks: BackgroundTasks):
             )
             sent += 1
 
-    return {"status": "queued", "parents_notified": sent}
+    return ok({"status": "queued", "parents_notified": sent})
 
 
 # ── Notification templates ────────────────────────────────────

@@ -1,7 +1,7 @@
 """Tests for JWT auth — token creation, validation, expiry."""
 import os
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -36,8 +36,8 @@ class TestCreateAccessToken:
     def test_token_expiry_is_future(self):
         token = create_access_token({"user_id": "u1", "email": "a@b.com", "role": "faculty"})
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        exp = datetime.utcfromtimestamp(payload["exp"])
-        assert exp > datetime.utcnow()
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        assert exp > datetime.now(timezone.utc)
 
     def test_empty_data_still_creates_token(self):
         token = create_access_token({})
@@ -82,7 +82,7 @@ class TestGetCurrentUser:
         # Create token that expired 1 hour ago
         payload = {
             "user_id": "u1", "email": "a@b.com", "role": "faculty",
-            "exp": datetime.utcnow() - timedelta(hours=1)
+            "exp": datetime.now(timezone.utc) - timedelta(hours=1)
         }
         expired_token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=expired_token)
@@ -95,7 +95,7 @@ class TestGetCurrentUser:
         from fastapi import HTTPException
         token = jwt.encode(
             {"user_id": "u1", "email": "a@b.com", "role": "faculty",
-             "exp": datetime.utcnow() + timedelta(hours=1)},
+             "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
             "wrong-secret", algorithm=ALGORITHM
         )
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)

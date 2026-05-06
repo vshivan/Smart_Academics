@@ -3,6 +3,9 @@ Export Service — Feature 3: PDF Export of Question Papers
 Generates formatted PDFs with header, instructions, answer key sheet.
 """
 import os, io, uuid, logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
@@ -42,9 +45,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Export Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "export-service"}
+    return ok({"status": "ok", "service": "export-service"})
 
 
 @app.get("/papers/{paper_id}/export/pdf")

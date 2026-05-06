@@ -1,15 +1,76 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig } from "axios";
+import { getToken, clearSession, saveSession, decodeToken, isTokenExpired, type User } from "@/lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export const api = axios.create({ baseURL: API_URL });
 
-// Attach JWT token to every request
+// ── Request interceptor — attach JWT ─────────────────────────
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access_token");
+  const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+// ── Response interceptor — handle 401 + proactive refresh ────
+let _refreshing = false;
+let _refreshQueue: Array<(token: string) => void> = [];
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config as AxiosRequestConfig & { _retry?: boolean };
+
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+
+      // If already refreshing, queue this request
+      if (_refreshing) {
+        return new Promise((resolve) => {
+          _refreshQueue.push((newToken: string) => {
+            original.headers = { ...original.headers, Authorization: `Bearer ${newToken}` };
+            resolve(api(original));
+          });
+        });
+      }
+
+      _refreshing = true;
+      try {
+        const resp = await axios.post(
+          `${API_URL}/auth/refresh`,
+          {},
+          { headers: { Authorization: `Bearer ${getToken()}` } }
+        );
+        const newToken: string = resp.data?.access_token;
+        if (newToken) {
+          // Decode new token to get updated user info
+          const payload = decodeToken(newToken);
+          const currentUser = JSON.parse(localStorage.getItem("user") || "{}") as User;
+          saveSession(newToken, { ...currentUser, role: (payload?.role as User["role"]) ?? currentUser.role });
+
+          // Flush queued requests
+          _refreshQueue.forEach((cb) => cb(newToken));
+          _refreshQueue = [];
+
+          // Retry original request
+          original.headers = { ...original.headers, Authorization: `Bearer ${newToken}` };
+          return api(original);
+        }
+      } catch {
+        // Refresh failed — clear session and redirect
+      } finally {
+        _refreshing = false;
+      }
+
+      clearSession();
+      if (typeof window !== "undefined") {
+        window.location.href = "/?session_expired=1";
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // ── Auth ──────────────────────────────────────────────────────
 export const getLoginUrl = () => `${API_URL}/auth/login`;
@@ -88,6 +149,22 @@ export const exportPaperPdf = (paperId: string, includeAnswers = false) =>
     params: { include_answers: includeAnswers },
     responseType: "blob",
   }).then((r) => r.data);
+
+// ── Excel export (client-side using CSV → xlsx conversion) ────
+export const exportResultsExcel = async (classId: string, sessionId?: string) => {
+  const resp = await api.get(`/analytics/${classId}/export/csv`, {
+    params: sessionId ? { session_id: sessionId } : {},
+    responseType: "text",
+  });
+  // Convert CSV to downloadable blob
+  const blob = new Blob([resp.data], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `results_${classId.slice(0, 8)}_${new Date().toISOString().split("T")[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 // ── Question Bank ─────────────────────────────────────────────
 export const getQuestionBank = (params: object) =>

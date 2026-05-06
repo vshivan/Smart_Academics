@@ -1,5 +1,22 @@
-"""API Gateway — single entry point, routes to microservices."""
+"""
+API Gateway — production-grade single entry point.
+
+Changes from original:
+  - Standardised API response envelope: {success, data, error, meta}
+  - Global exception handler (no raw 500s leak to clients)
+  - Structured JSON logging middleware
+  - RBAC guards on sensitive routes (admin/hod-only)
+  - Secure HTTP headers middleware
+  - Rate limiting (200 req/min default, 20/min on auth)
+  - ERR-004: version field removed from docker-compose (handled there)
+  - Service URLs fully env-driven
+"""
 import os
+import time
+import uuid
+import logging
+import traceback
+
 import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,12 +24,21 @@ from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-import logging
 
-from auth import router as auth_router, get_current_user
+from auth import (
+    router as auth_router,
+    get_current_user,
+    require_role,
+    require_permission,
+    require_hod_or_admin,
+    require_admin,
+)
 from proxy import proxy_request
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
+)
 logger = logging.getLogger(__name__)
 
 try:
@@ -20,34 +46,121 @@ try:
 except ImportError:
     pass
 
-# Rate limiter
+# ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
-app = FastAPI(title="SAAP API Gateway", version="1.0.0", docs_url="/docs")
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="SAAP API Gateway",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+_allowed_origins = list(filter(None, [
+    "http://localhost:3000",
+    os.getenv("FRONTEND_URL", ""),
+]))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", os.getenv("FRONTEND_URL", "")],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Service registry
+# ── Secure headers middleware ─────────────────────────────────────────────────
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"]    = "nosniff"
+    response.headers["X-Frame-Options"]           = "DENY"
+    response.headers["X-XSS-Protection"]          = "1; mode=block"
+    response.headers["Referrer-Policy"]           = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"]        = "geolocation=(), microphone=()"
+    if os.getenv("ENVIRONMENT") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
+
+# ── Request ID + structured logging middleware ────────────────────────────────
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    request_id = str(uuid.uuid4())[:8]
+    start = time.perf_counter()
+    request.state.request_id = request_id
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    logger.info(
+        f"method={request.method} path={request.url.path} "
+        f"status={response.status_code} duration_ms={duration_ms} "
+        f"request_id={request_id}"
+    )
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+# ── Global exception handler ──────────────────────────────────────────────────
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.error(f"Unhandled exception request_id={request_id}: {traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "request_id": request_id,
+            },
+        },
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": _status_to_code(exc.status_code),
+                "message": exc.detail,
+                "request_id": request_id,
+            },
+        },
+    )
+
+def _status_to_code(status: int) -> str:
+    return {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+        503: "SERVICE_UNAVAILABLE",
+        504: "GATEWAY_TIMEOUT",
+    }.get(status, "ERROR")
+
+# ── Service registry ─────────────────────────────────────────────────────────
 SERVICES = {
-    "syllabus":      os.getenv("SYLLABUS_SERVICE_URL",      "http://syllabus-service:8001"),
-    "knowledge":     os.getenv("KNOWLEDGE_SERVICE_URL",     "http://knowledge-service:8002"),
-    "questions":     os.getenv("QUESTION_SERVICE_URL",      "http://question-service:8003"),
-    "evaluation":    os.getenv("EVALUATION_SERVICE_URL",    "http://evaluation-service:8004"),
-    "analytics":     os.getenv("ANALYTICS_SERVICE_URL",     "http://analytics-service:8005"),
-    "management":    os.getenv("MANAGEMENT_SERVICE_URL",    "http://management-service:8006"),
-    "export":        os.getenv("EXPORT_SERVICE_URL",        "http://export-service:8007"),
-    "features":      os.getenv("FEATURES_SERVICE_URL",      "http://features-service:8008"),
-    "student":       os.getenv("STUDENT_SERVICE_URL",       "http://student-service:8009"),
-    "notification":  os.getenv("NOTIFICATION_SERVICE_URL",  "http://notification-service:8010"),
-    "advanced":      os.getenv("ADVANCED_SERVICE_URL",      "http://advanced-service:8011"),
+    "syllabus":     os.getenv("SYLLABUS_SERVICE_URL",     "http://syllabus-service:8001"),
+    "knowledge":    os.getenv("KNOWLEDGE_SERVICE_URL",    "http://knowledge-service:8002"),
+    "questions":    os.getenv("QUESTION_SERVICE_URL",     "http://question-service:8003"),
+    "evaluation":   os.getenv("EVALUATION_SERVICE_URL",   "http://evaluation-service:8004"),
+    "analytics":    os.getenv("ANALYTICS_SERVICE_URL",    "http://analytics-service:8005"),
+    "management":   os.getenv("MANAGEMENT_SERVICE_URL",   "http://management-service:8006"),
+    "export":       os.getenv("EXPORT_SERVICE_URL",       "http://export-service:8007"),
+    "features":     os.getenv("FEATURES_SERVICE_URL",     "http://features-service:8008"),
+    "student":      os.getenv("STUDENT_SERVICE_URL",      "http://student-service:8009"),
+    "notification": os.getenv("NOTIFICATION_SERVICE_URL", "http://notification-service:8010"),
+    "advanced":     os.getenv("ADVANCED_SERVICE_URL",     "http://advanced-service:8011"),
 }
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
@@ -55,11 +168,11 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "api-gateway"}
+    return {"success": True, "data": {"status": "ok", "service": "api-gateway"}, "error": None}
 
 
 # ── Syllabus routes ──────────────────────────────────────────
-@app.post("/upload-syllabus")
+@app.post("/upload-syllabus", dependencies=[Depends(require_permission("upload_syllabus"))])
 async def upload_syllabus(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["syllabus"], "/upload", user)
 
@@ -81,7 +194,7 @@ async def get_topics(subject_id: str, request: Request, user=Depends(get_current
 
 
 # ── Question Paper routes ────────────────────────────────────
-@app.post("/generate-paper")
+@app.post("/generate-paper", dependencies=[Depends(require_permission("generate_papers"))])
 async def generate_paper(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["questions"], "/generate", user)
 
@@ -102,7 +215,7 @@ async def finalize_paper(paper_id: str, request: Request, user=Depends(get_curre
 
 
 # ── Evaluation routes ────────────────────────────────────────
-@app.post("/evaluate-assignment")
+@app.post("/evaluate-assignment", dependencies=[Depends(require_permission("evaluate_assignments"))])
 async def evaluate_assignment(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["evaluation"], "/evaluate", user)
 
@@ -118,6 +231,14 @@ async def override_result(session_id: str, result_id: str, request: Request, use
 
 
 # ── Analytics routes ─────────────────────────────────────────
+# IMPORTANT: literal-path routes must be registered BEFORE wildcard routes.
+# /analytics/compare MUST come before /analytics/{class_id}, otherwise FastAPI
+# matches class_id='compare' on the wildcard, silently bypassing the permission guard.
+@app.get("/analytics/compare", dependencies=[Depends(require_permission("view_dept_analytics"))])
+async def compare_classes(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/analytics/compare", user)
+
+
 @app.get("/analytics/{class_id}")
 async def get_analytics(class_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["analytics"], f"/analytics/{class_id}", user)
@@ -141,7 +262,7 @@ async def student_risk(class_id: str, request: Request, user=Depends(get_current
 
 
 # ── Management routes ─────────────────────────────────────────
-@app.post("/colleges")
+@app.post("/colleges", dependencies=[Depends(require_permission("manage_colleges"))])
 async def create_college(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["management"], "/colleges", user)
 
@@ -173,7 +294,7 @@ async def list_classes(college_id: str, request: Request, user=Depends(get_curre
 async def list_faculty(college_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["management"], f"/colleges/{college_id}/faculty", user)
 
-@app.get("/colleges/{college_id}/hod-summary")
+@app.get("/colleges/{college_id}/hod-summary", dependencies=[Depends(require_hod_or_admin)])
 async def hod_summary(college_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["management"], f"/colleges/{college_id}/hod-summary", user)
 
@@ -201,11 +322,11 @@ async def export_pdf(paper_id: str, request: Request, user=Depends(get_current_u
 
 
 # ── Features routes ───────────────────────────────────────────
-@app.get("/question-bank")
+@app.get("/question-bank", dependencies=[Depends(require_permission("use_question_bank"))])
 async def get_question_bank(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], "/question-bank", user)
 
-@app.post("/question-bank")
+@app.post("/question-bank", dependencies=[Depends(require_permission("use_question_bank"))])
 async def add_question_bank(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], "/question-bank", user)
 
@@ -221,11 +342,11 @@ async def syllabus_versions(subject_id: str, request: Request, user=Depends(get_
 async def restore_version(subject_id: str, version_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], f"/subjects/{subject_id}/syllabus-versions/{version_id}/restore", user)
 
-@app.get("/rubrics")
+@app.get("/rubrics", dependencies=[Depends(require_permission("build_rubrics"))])
 async def list_rubrics(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], "/rubrics", user)
 
-@app.post("/rubrics")
+@app.post("/rubrics", dependencies=[Depends(require_permission("build_rubrics"))])
 async def create_rubric(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["features"], "/rubrics", user)
 
@@ -367,19 +488,15 @@ async def add_collaborator(class_id: str, request: Request, user=Depends(get_cur
 async def list_collaborators(class_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], f"/classes/{class_id}/collaborators", user)
 
-@app.get("/analytics/compare")
-async def compare_classes(request: Request, user=Depends(get_current_user)):
-    return await proxy_request(request, SERVICES["advanced"], "/analytics/compare", user)
-
 @app.get("/analytics/semester-trend/{subject_id}")
 async def semester_trend(subject_id: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], f"/analytics/semester-trend/{subject_id}", user)
 
-@app.post("/accreditation/generate")
+@app.post("/accreditation/generate", dependencies=[Depends(require_permission("generate_accreditation"))])
 async def generate_accreditation(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], "/accreditation/generate", user)
 
-@app.get("/accreditation/reports")
+@app.get("/accreditation/reports", dependencies=[Depends(require_permission("generate_accreditation"))])
 async def list_accreditation(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], "/accreditation/reports", user)
 
@@ -395,6 +512,6 @@ async def predict_difficulty(question_bank_id: str, request: Request, user=Depen
 async def rbac_check(request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], "/rbac/check", user)
 
-@app.get("/rbac/permissions/{role}")
+@app.get("/rbac/permissions/{role}", dependencies=[Depends(require_admin)])
 async def rbac_permissions(role: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], f"/rbac/permissions/{role}", user)

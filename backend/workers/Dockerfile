@@ -17,6 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && python -c "import nltk; nltk.download('stopwords', quiet=True); nltk.download('punkt', quiet=True)"
 
 COPY shared/monitoring.py ./monitoring.py
+COPY shared/response.py ./response.py
+COPY shared/cache.py ./cache.py
 # Workers need syllabus-service modules for task imports
 COPY syllabus-service/pdf_extractor.py ./pdf_extractor.py
 COPY syllabus-service/nlp_pipeline.py  ./nlp_pipeline.py

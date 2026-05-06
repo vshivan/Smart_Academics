@@ -3,6 +3,9 @@ import os
 import json
 import uuid
 import logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, BackgroundTasks
 from pydantic import BaseModel
@@ -45,6 +48,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Evaluation Service", version="1.0.0", lifespan=lifespan)
 evaluator = AssignmentEvaluator()
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 
 class EvaluateRequest(BaseModel):
     class_id: str
@@ -58,7 +75,7 @@ class EvaluateRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "evaluation-service"}
+    return ok({"status": "ok", "service": "evaluation-service"})
 
 
 @app.post("/evaluate")
@@ -88,7 +105,7 @@ async def start_evaluation(
         run_evaluation, session_id, body, user_tokens, x_college_id
     )
 
-    return {"session_id": session_id, "status": "processing"}
+    return ok({"session_id": session_id, "status": "processing"})
 
 
 async def run_evaluation(session_id: str, body: EvaluateRequest, user_tokens: dict, college_id: str):
@@ -187,11 +204,11 @@ async def get_results(session_id: str):
         "SELECT * FROM evaluation_results WHERE session_id=$1 ORDER BY marks_awarded DESC",
         session_id,
     )
-    return {
+    return ok({
         "session": dict(session),
         "results": [dict(r) for r in results],
         "flagged_for_review": sum(1 for r in results if r["needs_review"]),
-    }
+    })
 
 
 @app.patch("/sessions/{session_id}/results/{result_id}/override")
@@ -204,7 +221,7 @@ async def override_result(session_id: str, result_id: str, marks: float, feedbac
            WHERE id=$3 AND session_id=$4""",
         marks, feedback, result_id, session_id,
     )
-    return {"status": "overridden"}
+    return ok({"status": "overridden"})
 
 
 async def _get_user_tokens(user_id: str) -> dict:

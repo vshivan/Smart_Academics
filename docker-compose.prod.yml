@@ -1,0 +1,204 @@
+# Production docker-compose — extends base compose with:
+#   - Nginx reverse proxy with SSL
+#   - Resource limits on all services
+#   - Restart policies
+#   - No exposed ports except 80/443 (everything behind Nginx)
+#   - Health checks on all services
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  nginx:
+    build:
+      context: ./infra/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api-gateway
+      - frontend
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  postgres:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  redis:
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  api-gateway:
+    restart: always
+    ports: []   # remove direct port exposure — traffic goes through Nginx
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  syllabus-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  knowledge-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  question-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  evaluation-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  analytics-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  management-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  export-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  features-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  student-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  notification-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  advanced-service:
+    restart: always
+    ports: []
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  celery-worker:
+    restart: always
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  celery-beat:
+    restart: always
+    environment:
+      - ENVIRONMENT=production
+
+  frontend:
+    restart: always
+    ports: []   # traffic goes through Nginx
+    environment:
+      - ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M

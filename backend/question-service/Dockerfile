@@ -12,6 +12,8 @@ COPY question-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY shared/monitoring.py ./monitoring.py
+COPY shared/response.py ./response.py
+COPY shared/cache.py ./cache.py
 COPY question-service/ .
 
 RUN chown -R saap:saap /app

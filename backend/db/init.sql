@@ -29,7 +29,7 @@ CREATE TABLE users (
     name VARCHAR(255),
     google_id VARCHAR(255) UNIQUE,
     role VARCHAR(50) DEFAULT 'faculty',   -- faculty | admin | hod
-    google_tokens JSONB,                  -- encrypted OAuth tokens
+    google_tokens TEXT,                   -- Fernet-encrypted OAuth tokens (not JSONB — stored as encrypted string)
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     last_login TIMESTAMPTZ

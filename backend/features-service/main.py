@@ -4,6 +4,9 @@ Question Bank, Syllabus Versions, Rubric Builder,
 Notifications, Difficulty Calibration, Plagiarism Detection
 """
 import os, json, uuid, logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Header
@@ -38,9 +41,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Features Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "features-service"}
+    return ok({"status": "ok", "service": "features-service"})
 
 # ══════════════════════════════════════════════════════════════
 # FEATURE 6: QUESTION BANK
@@ -77,7 +94,7 @@ async def add_to_bank(body: QuestionBankAdd, x_user_id: str = Header(...), x_col
         body.keywords, body.difficulty, body.tags, body.language,
         body.source_paper_id, x_user_id
     )
-    return {"id": qid, "status": "added"}
+    return ok({"id": qid, "status": "added"})
 
 
 @app.get("/question-bank")
@@ -113,7 +130,7 @@ async def search_bank(
         f"SELECT * FROM question_bank WHERE {where} ORDER BY usage_count DESC LIMIT {limit}",
         *params
     )
-    return {"questions": [dict(r) for r in rows], "total": len(rows)}
+    return ok({"questions": [dict(r) for r in rows], "total": len(rows)})
 
 
 @app.post("/question-bank/import-from-paper/{paper_id}")
@@ -139,7 +156,7 @@ async def import_from_paper(paper_id: str, x_user_id: str = Header(...), x_colle
             q["unit_name"], q["answer_key"], q["keywords"] or [], paper_id, x_user_id
         )
         imported += 1
-    return {"imported": imported}
+    return ok({"imported": imported})
 
 
 # ══════════════════════════════════════════════════════════════
@@ -156,7 +173,7 @@ async def list_versions(subject_id: str):
            WHERE sv.subject_id=$1 ORDER BY sv.version_number DESC""",
         subject_id
     )
-    return {"versions": [dict(r) for r in rows]}
+    return ok({"versions": [dict(r) for r in rows]})
 
 
 @app.get("/subjects/{subject_id}/syllabus-versions/{version_id}")
@@ -168,7 +185,7 @@ async def get_version(subject_id: str, version_id: str):
     )
     if not row:
         raise HTTPException(404, "Version not found")
-    return dict(row)
+    return ok(dict(row))
 
 
 @app.post("/subjects/{subject_id}/syllabus-versions/{version_id}/restore")
@@ -190,7 +207,7 @@ async def restore_version(subject_id: str, version_id: str, x_college_id: str = 
            version=version+1, last_updated=NOW() WHERE subject_id=$4""",
         json.dumps(graph), unit_count, topic_count, subject_id
     )
-    return {"status": "restored", "unit_count": unit_count}
+    return ok({"status": "restored", "unit_count": unit_count})
 
 
 # ══════════════════════════════════════════════════════════════
@@ -216,7 +233,7 @@ async def create_rubric(body: RubricCreate, x_user_id: str = Header(...), x_coll
         rid, x_college_id, x_user_id, body.name, body.description,
         json.dumps(body.criteria), total_weight, body.is_shared
     )
-    return {"id": rid, "name": body.name}
+    return ok({"id": rid, "name": body.name})
 
 
 @app.get("/rubrics")
@@ -226,7 +243,7 @@ async def list_rubrics(x_college_id: str = Header(...)):
         "SELECT id, name, description, criteria, total_weight, is_shared, usage_count FROM rubric_templates WHERE college_id=$1 ORDER BY usage_count DESC",
         x_college_id
     )
-    return {"rubrics": [dict(r) for r in rows]}
+    return ok({"rubrics": [dict(r) for r in rows]})
 
 
 @app.get("/rubrics/{rubric_id}")
@@ -235,7 +252,7 @@ async def get_rubric(rubric_id: str):
     row = await pool.fetchrow("SELECT * FROM rubric_templates WHERE id=$1", rubric_id)
     if not row:
         raise HTTPException(404, "Rubric not found")
-    return dict(row)
+    return ok(dict(row))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -258,7 +275,7 @@ async def get_notifications(unread_only: bool = False, x_user_id: str = Header(.
     unread_count = await pool.fetchval(
         "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE", x_user_id
     )
-    return {"notifications": [dict(r) for r in rows], "unread_count": unread_count}
+    return ok({"notifications": [dict(r) for r in rows], "unread_count": unread_count})
 
 
 @app.post("/notifications/{notification_id}/read")
@@ -268,14 +285,14 @@ async def mark_read(notification_id: str, x_user_id: str = Header(...)):
         "UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2",
         notification_id, x_user_id
     )
-    return {"status": "read"}
+    return ok({"status": "read"})
 
 
 @app.post("/notifications/read-all")
 async def mark_all_read(x_user_id: str = Header(...)):
     pool = await get_pool()
     await pool.execute("UPDATE notifications SET is_read=TRUE WHERE user_id=$1", x_user_id)
-    return {"status": "all_read"}
+    return ok({"status": "all_read"})
 
 
 async def send_notification(user_id: str, college_id: str, notif_type: str,
@@ -305,7 +322,7 @@ async def calibrate_difficulty(session_id: str):
         session_id
     )
     if not results:
-        return {"status": "no_data"}
+        return ok({"status": "no_data"})
 
     avg_pct = sum(r["marks_awarded"] / r["total_marks"] for r in results) / len(results)
 
@@ -327,7 +344,7 @@ async def calibrate_difficulty(session_id: str):
             round(avg_pct * 100, 2), len(results), calibrated
         )
 
-    return {"calibrated_difficulty": calibrated, "avg_score_pct": round(avg_pct * 100, 2)}
+    return ok({"calibrated_difficulty": calibrated, "avg_score_pct": round(avg_pct * 100, 2)})
 
 
 # ══════════════════════════════════════════════════════════════
@@ -343,7 +360,7 @@ async def check_plagiarism(session_id: str, threshold: float = 0.75):
         session_id
     )
     if len(results) < 2:
-        return {"pairs": [], "flagged": 0}
+        return ok({"pairs": [], "flagged": 0})
 
     texts = [r["feedback"] or "" for r in results]
     ids = [r["student_google_id"] for r in results]
@@ -354,7 +371,7 @@ async def check_plagiarism(session_id: str, threshold: float = 0.75):
         matrix = vec.fit_transform(texts)
         sim_matrix = cosine_similarity(matrix)
     except Exception:
-        return {"pairs": [], "flagged": 0, "error": "insufficient text"}
+        return ok({"pairs": [], "flagged": 0, "error": "insufficient text"})
 
     flagged_pairs = []
     for i in range(len(results)):
@@ -375,7 +392,7 @@ async def check_plagiarism(session_id: str, threshold: float = 0.75):
                     "similarity": round(score * 100, 2),
                 })
 
-    return {"pairs": flagged_pairs, "flagged": len(flagged_pairs), "threshold_pct": threshold * 100}
+    return ok({"pairs": flagged_pairs, "flagged": len(flagged_pairs), "threshold_pct": threshold * 100})
 
 
 @app.get("/plagiarism/{session_id}/report")
@@ -385,7 +402,7 @@ async def get_plagiarism_report(session_id: str):
         "SELECT * FROM plagiarism_reports WHERE session_id=$1 ORDER BY similarity_score DESC",
         session_id
     )
-    return {"reports": [dict(r) for r in rows]}
+    return ok({"reports": [dict(r) for r in rows]})
 
 
 # ══════════════════════════════════════════════════════════════
@@ -441,4 +458,4 @@ async def batch_override(session_id: str, body: BatchOverride, x_user_id: str = 
         str(uuid.uuid4()), session_id, x_user_id,
         body.adjustment_type, body.adjustment_value, updated
     )
-    return {"updated": updated, "adjustment_type": body.adjustment_type}
+    return ok({"updated": updated, "adjustment_type": body.adjustment_type})

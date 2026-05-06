@@ -6,6 +6,8 @@ celery_app = Celery(
     "saap_workers",
     broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1"),
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2"),
+    # ERR-003 fix: removed "evaluation_tasks" — that module does not exist.
+    # Evaluation runs as FastAPI BackgroundTasks, not Celery tasks.
     include=["syllabus_tasks"],
 )
 
@@ -19,6 +21,5 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_routes={
         "syllabus_tasks.*": {"queue": "syllabus"},
-        "evaluation_tasks.*": {"queue": "evaluation"},
     },
 )

@@ -1,9 +1,12 @@
-﻿"""
+"""
 Advanced Service — Paper Templates, Attendance, Certificates,
 Comparative Analytics, Accreditation Reports, Difficulty Prediction,
 Co-Faculty Collaboration, Bulk Student Import, AI Chatbot (FAQ-based)
 """
 import os, json, uuid, io, logging, csv
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Header, UploadFile, File
@@ -40,9 +43,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Advanced Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "advanced-service"}
+    return ok({"status": "ok", "service": "advanced-service"})
 
 # ── PAPER TEMPLATES ───────────────────────────────────────────
 
@@ -70,7 +87,7 @@ async def create_template(body: TemplateCreate, x_user_id: str = Header(...), x_
         body.total_marks, body.duration_minutes, json.dumps(body.blooms_distribution),
         json.dumps(body.sections), body.instructions, body.is_default
     )
-    return {"id": tid, "name": body.name}
+    return ok({"id": tid, "name": body.name})
 
 @app.get("/paper-templates")
 async def list_templates(x_college_id: str = Header(...)):
@@ -79,7 +96,7 @@ async def list_templates(x_college_id: str = Header(...)):
         "SELECT * FROM paper_templates WHERE college_id=$1 ORDER BY usage_count DESC, created_at DESC",
         x_college_id
     )
-    return {"templates": [dict(r) for r in rows]}
+    return ok({"templates": [dict(r) for r in rows]})
 
 @app.get("/paper-templates/{template_id}")
 async def get_template(template_id: str):
@@ -88,7 +105,7 @@ async def get_template(template_id: str):
     if not row:
         raise HTTPException(404, "Template not found")
     await pool.execute("UPDATE paper_templates SET usage_count=usage_count+1 WHERE id=$1", template_id)
-    return dict(row)
+    return ok(dict(row))
 
 # ── ATTENDANCE ────────────────────────────────────────────────
 
@@ -113,7 +130,7 @@ async def create_attendance_session(body: AttendanceSession, x_user_id: str = He
            VALUES ($1,$2,$3,$4,$5,$6,$7)""",
         sid, body.class_id, x_college_id, body.session_date, body.session_type, body.topic, x_user_id
     )
-    return {"id": sid, "session_date": body.session_date}
+    return ok({"id": sid, "session_date": body.session_date})
 
 @app.post("/attendance/sessions/{session_id}/mark")
 async def mark_attendance(session_id: str, records: list[AttendanceMark]):
@@ -125,7 +142,7 @@ async def mark_attendance(session_id: str, records: list[AttendanceMark]):
                ON CONFLICT DO NOTHING""",
             str(uuid.uuid4()), session_id, r.student_id, r.student_name, r.status, r.remarks
         )
-    return {"marked": len(records)}
+    return ok({"marked": len(records)})
 
 @app.get("/attendance/{class_id}")
 async def get_attendance(class_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None):
@@ -142,7 +159,7 @@ async def get_attendance(class_id: str, from_date: Optional[str] = None, to_date
            ORDER BY ats.session_date DESC""",
         class_id
     )
-    return {"sessions": [dict(r) for r in rows]}
+    return ok({"sessions": [dict(r) for r in rows]})
 
 @app.get("/attendance/{class_id}/student/{student_id}")
 async def get_student_attendance(class_id: str, student_id: str):
@@ -158,7 +175,7 @@ async def get_student_attendance(class_id: str, student_id: str):
     total = len(rows)
     present = sum(1 for r in rows if r["status"] == "present")
     pct = round(present / total * 100, 1) if total > 0 else 0
-    return {"records": [dict(r) for r in rows], "total": total, "present": present, "attendance_pct": pct}
+    return ok({"records": [dict(r) for r in rows], "total": total, "present": present, "attendance_pct": pct})
 
 # ── CERTIFICATES ──────────────────────────────────────────────
 
@@ -212,7 +229,7 @@ async def generate_certificate(body: CertificateRequest, x_user_id: str = Header
 async def list_certificates(class_id: str):
     pool = await get_pool()
     rows = await pool.fetch("SELECT * FROM certificates WHERE class_id=$1 ORDER BY issued_date DESC", class_id)
-    return {"certificates": [dict(r) for r in rows]}
+    return ok({"certificates": [dict(r) for r in rows]})
 
 # ── BULK STUDENT IMPORT ───────────────────────────────────────
 
@@ -253,7 +270,7 @@ async def bulk_import_students(class_id: str, file: UploadFile = File(...), x_us
                failed_count=$3, errors=$4::jsonb, completed_at=NOW() WHERE id=$5""",
             imported + len(errors), imported, len(errors), json.dumps(errors), import_id
         )
-        return {"import_id": import_id, "imported": imported, "errors": len(errors)}
+        return ok({"import_id": import_id, "imported": imported, "errors": len(errors)})
     except Exception as e:
         await pool.execute("UPDATE bulk_imports SET status='failed' WHERE id=$1", import_id)
         raise HTTPException(400, f"Import failed: {e}")
@@ -264,13 +281,13 @@ async def get_import_status(import_id: str):
     row = await pool.fetchrow("SELECT * FROM bulk_imports WHERE id=$1", import_id)
     if not row:
         raise HTTPException(404, "Import not found")
-    return dict(row)
+    return ok(dict(row))
 
 @app.get("/classes/{class_id}/students")
 async def list_class_students(class_id: str):
     pool = await get_pool()
     rows = await pool.fetch("SELECT * FROM class_students WHERE class_id=$1 AND is_active=TRUE ORDER BY student_name", class_id)
-    return {"students": [dict(r) for r in rows], "total": len(rows)}
+    return ok({"students": [dict(r) for r in rows], "total": len(rows)})
 
 # ── CO-FACULTY COLLABORATION ──────────────────────────────────
 
@@ -287,7 +304,7 @@ async def add_collaborator(class_id: str, body: CollaboratorAdd, x_user_id: str 
            VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING""",
         cid, class_id, body.faculty_id, body.role, x_user_id
     )
-    return {"status": "added"}
+    return ok({"status": "added"})
 
 @app.get("/classes/{class_id}/collaborators")
 async def list_collaborators(class_id: str):
@@ -298,7 +315,7 @@ async def list_collaborators(class_id: str):
            WHERE cc.class_id=$1""",
         class_id
     )
-    return {"collaborators": [dict(r) for r in rows]}
+    return ok({"collaborators": [dict(r) for r in rows]})
 
 # ── COMPARATIVE ANALYTICS ─────────────────────────────────────
 
@@ -328,7 +345,7 @@ async def compare_classes(class_ids: str, x_college_id: str = Header(...)):
         if row:
             results.append(dict(row))
 
-    return {"comparison": results, "class_count": len(results)}
+    return ok({"comparison": results, "class_count": len(results)})
 
 @app.get("/analytics/semester-trend/{subject_id}")
 async def semester_trend(subject_id: str, x_college_id: str = Header(...)):
@@ -343,7 +360,7 @@ async def semester_trend(subject_id: str, x_college_id: str = Header(...)):
            GROUP BY ay.id, ay.label ORDER BY ay.label""",
         subject_id, x_college_id
     )
-    return {"trend": [dict(r) for r in rows]}
+    return ok({"trend": [dict(r) for r in rows]})
 
 # ── ACCREDITATION REPORTS ─────────────────────────────────────
 
@@ -389,7 +406,7 @@ async def generate_accreditation(
            VALUES ($1,$2,$3,$4,$5,$6::jsonb,'draft')""",
         rid, x_college_id, x_user_id, report_type, academic_year_id, json.dumps(data)
     )
-    return {"report_id": rid, "data": data}
+    return ok({"report_id": rid, "data": data})
 
 @app.get("/accreditation/reports")
 async def list_reports(x_college_id: str = Header(...)):
@@ -398,7 +415,7 @@ async def list_reports(x_college_id: str = Header(...)):
         "SELECT id, report_type, status, generated_at FROM accreditation_reports WHERE college_id=$1 ORDER BY generated_at DESC",
         x_college_id
     )
-    return {"reports": [dict(r) for r in rows]}
+    return ok({"reports": [dict(r) for r in rows]})
 
 # ── AI CHATBOT (FAQ-based, uses knowledge graph) ──────────────
 
@@ -465,7 +482,7 @@ async def chatbot_message(body: ChatMessage, x_user_id: str = Header(default="an
             json.dumps([{"role": "user", "text": body.message}, {"role": "bot", "text": response}])
         )
 
-    return {"response": response, "conversation_id": conv_id}
+    return ok({"response": response, "conversation_id": conv_id})
 
 # ── DIFFICULTY PREDICTION ─────────────────────────────────────
 
@@ -477,7 +494,7 @@ async def predict_difficulty(question_bank_id: str):
         question_bank_id
     )
     if not perf:
-        return {"predicted_difficulty": "medium", "confidence": 0.5, "message": "No performance data yet"}
+        return ok({"predicted_difficulty": "medium", "confidence": 0.5, "message": "No performance data yet"})
 
     avg = sum(p["avg_score"] for p in perf) / len(perf)
     total_attempts = sum(p["attempt_count"] for p in perf)
@@ -495,7 +512,7 @@ async def predict_difficulty(question_bank_id: str):
            WHERE question_bank_id=$3""",
         difficulty, round(confidence, 2), question_bank_id
     )
-    return {"predicted_difficulty": difficulty, "confidence": round(confidence, 2), "avg_score": round(avg, 2)}
+    return ok({"predicted_difficulty": difficulty, "confidence": round(confidence, 2), "avg_score": round(avg, 2)})
 
 # ── RBAC PERMISSION CHECK ─────────────────────────────────────
 
@@ -506,10 +523,10 @@ async def check_permission(role: str, permission: str):
         "SELECT 1 FROM role_permissions WHERE role=$1 AND permission=$2",
         role, permission
     )
-    return {"allowed": row is not None, "role": role, "permission": permission}
+    return ok({"allowed": row is not None, "role": role, "permission": permission})
 
 @app.get("/rbac/permissions/{role}")
 async def get_role_permissions(role: str):
     pool = await get_pool()
     rows = await pool.fetch("SELECT permission FROM role_permissions WHERE role=$1", role)
-    return {"role": role, "permissions": [r["permission"] for r in rows]}
+    return ok({"role": role, "permissions": [r["permission"] for r in rows]})

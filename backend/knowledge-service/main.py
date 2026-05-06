@@ -1,12 +1,20 @@
-"""Knowledge Graph Service — store and query subject knowledge."""
+"""Knowledge Graph Service — store and query subject knowledge with Redis caching."""
 import os
 import json
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
+from cache import cache
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 import asyncpg
 import logging
+
+# Cache TTLs
+KG_TTL     = 3600   # knowledge graph: 1 hour
+TOPICS_TTL = 3600   # topics list: 1 hour
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -36,6 +44,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Knowledge Graph Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saap:saap_pass@postgres:5432/saap_db")
+
 
 class KGUpsertRequest(BaseModel):
     graph_data: dict
@@ -45,7 +69,8 @@ class KGUpsertRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "knowledge-service"}
+    redis_ok = await cache.ping()
+    return ok({"status": "ok", "service": "knowledge-service", "redis": redis_ok})
 
 
 @app.post("/subjects/{subject_id}/knowledge")
@@ -88,12 +113,20 @@ async def upsert_knowledge_graph(subject_id: str, body: KGUpsertRequest):
             )
 
     logger.info(f"Knowledge graph stored: subject={subject_id}, units={unit_count}, topics={topic_count}")
-    return {"status": "stored", "unit_count": unit_count, "topic_count": topic_count}
+    # Invalidate cache so next read gets fresh data
+    await cache.delete(f"kg:{subject_id}")
+    await cache.delete(f"topics:{subject_id}")
+    return ok({"status": "stored", "unit_count": unit_count, "topic_count": topic_count})
 
 
 @app.get("/subjects/{subject_id}/knowledge")
 async def get_knowledge_graph(subject_id: str):
-    """Retrieve full knowledge graph for a subject."""
+    """Retrieve full knowledge graph for a subject — Redis cached for 1 hour."""
+    # Try cache first
+    cached = await cache.get(f"kg:{subject_id}")
+    if cached:
+        return ok(cached)
+
     pool = await get_pool()
     row = await pool.fetchrow(
         "SELECT graph_data, unit_count, topic_count, version, last_updated FROM knowledge_graphs WHERE subject_id=$1",
@@ -101,7 +134,8 @@ async def get_knowledge_graph(subject_id: str):
     )
     if not row:
         raise HTTPException(status_code=404, detail="Knowledge graph not found. Upload syllabus first.")
-    return {
+
+    data = {
         "subject_id": subject_id,
         "graph": row["graph_data"],
         "unit_count": row["unit_count"],
@@ -109,11 +143,18 @@ async def get_knowledge_graph(subject_id: str):
         "version": row["version"],
         "last_updated": str(row["last_updated"]),
     }
+    await cache.set(f"kg:{subject_id}", data, ttl=KG_TTL)
+    return ok(data)
 
 
 @app.get("/subjects/{subject_id}/topics")
 async def get_topics(subject_id: str, unit_name: Optional[str] = None):
-    """Get flattened topics list, optionally filtered by unit."""
+    """Get flattened topics list — Redis cached for 1 hour."""
+    cache_key = f"topics:{subject_id}:{unit_name or 'all'}"
+    cached = await cache.get(cache_key)
+    if cached:
+        return ok(cached)
+
     pool = await get_pool()
     if unit_name:
         rows = await pool.fetch(
@@ -125,7 +166,9 @@ async def get_topics(subject_id: str, unit_name: Optional[str] = None):
             "SELECT * FROM kg_topics WHERE subject_id=$1 ORDER BY unit_order, topic_name",
             subject_id,
         )
-    return {"topics": [dict(r) for r in rows]}
+    data = {"topics": [dict(r) for r in rows]}
+    await cache.set(cache_key, data, ttl=TOPICS_TTL)
+    return ok(data)
 
 
 @app.get("/subjects/{subject_id}/units")
@@ -136,4 +179,4 @@ async def get_units(subject_id: str):
         "SELECT DISTINCT unit_name, unit_order FROM kg_topics WHERE subject_id=$1 ORDER BY unit_order",
         subject_id,
     )
-    return {"units": [dict(r) for r in rows]}
+    return ok({"units": [dict(r) for r in rows]})

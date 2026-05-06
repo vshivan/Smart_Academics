@@ -3,6 +3,9 @@ Management Service — Features 1, 2, 10
 College setup, faculty management, subjects, classes, departments, RBAC
 """
 import os, json, uuid, logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Header
@@ -33,6 +36,20 @@ async def lifespan(app: FastAPI):
     await _pool.close()
 
 app = FastAPI(title="Management Service", version="1.0.0", lifespan=lifespan)
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
 
 # ── Models ────────────────────────────────────────────────────
 
@@ -74,7 +91,7 @@ class AcademicYearCreate(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "management-service"}
+    return ok({"status": "ok", "service": "management-service"})
 
 # ── College ───────────────────────────────────────────────────
 
@@ -87,13 +104,13 @@ async def create_college(body: CollegeCreate):
            VALUES ($1,$2,$3,$4,$5,$6)""",
         cid, body.name, body.domain, body.address, body.phone, body.established_year
     )
-    return {"id": cid, "name": body.name}
+    return ok({"id": cid, "name": body.name})
 
 @app.get("/colleges")
 async def list_colleges():
     pool = await get_pool()
     rows = await pool.fetch("SELECT id, name, domain, is_active, created_at FROM colleges ORDER BY name")
-    return {"colleges": [dict(r) for r in rows]}
+    return ok({"colleges": [dict(r) for r in rows]})
 
 @app.get("/colleges/{college_id}")
 async def get_college(college_id: str):
@@ -101,7 +118,7 @@ async def get_college(college_id: str):
     row = await pool.fetchrow("SELECT * FROM colleges WHERE id=$1", college_id)
     if not row:
         raise HTTPException(404, "College not found")
-    return dict(row)
+    return ok(dict(row))
 
 # ── Academic Years ────────────────────────────────────────────
 
@@ -115,7 +132,7 @@ async def create_academic_year(college_id: str, body: AcademicYearCreate):
         "INSERT INTO academic_years (id, college_id, label, is_current) VALUES ($1,$2,$3,$4)",
         yid, college_id, body.label, body.is_current
     )
-    return {"id": yid, "label": body.label}
+    return ok({"id": yid, "label": body.label})
 
 @app.get("/colleges/{college_id}/academic-years")
 async def list_academic_years(college_id: str):
@@ -124,7 +141,7 @@ async def list_academic_years(college_id: str):
         "SELECT id, label, is_current, created_at FROM academic_years WHERE college_id=$1 ORDER BY created_at DESC",
         college_id
     )
-    return {"academic_years": [dict(r) for r in rows]}
+    return ok({"academic_years": [dict(r) for r in rows]})
 
 # ── Departments ───────────────────────────────────────────────
 
@@ -136,7 +153,7 @@ async def create_department(college_id: str, body: DepartmentCreate, x_user_id: 
         "INSERT INTO departments (id, college_id, name, code, hod_id) VALUES ($1,$2,$3,$4,$5)",
         did, college_id, body.name, body.code, body.hod_id
     )
-    return {"id": did, "name": body.name}
+    return ok({"id": did, "name": body.name})
 
 @app.get("/colleges/{college_id}/departments")
 async def list_departments(college_id: str):
@@ -147,7 +164,7 @@ async def list_departments(college_id: str):
            WHERE d.college_id=$1 ORDER BY d.name""",
         college_id
     )
-    return {"departments": [dict(r) for r in rows]}
+    return ok({"departments": [dict(r) for r in rows]})
 
 # ── Subjects ──────────────────────────────────────────────────
 
@@ -164,7 +181,7 @@ async def create_subject(college_id: str, body: SubjectCreate, x_user_id: str = 
         body.department_id, body.semester, body.description,
         body.credits, body.language, body.academic_year_id, x_user_id
     )
-    return {"id": sid, "name": body.name}
+    return ok({"id": sid, "name": body.name})
 
 @app.get("/colleges/{college_id}/subjects")
 async def list_subjects(college_id: str, department: Optional[str] = None):
@@ -179,7 +196,7 @@ async def list_subjects(college_id: str, department: Optional[str] = None):
             "SELECT id, name, code, department, semester, credits, is_active FROM subjects WHERE college_id=$1 ORDER BY name",
             college_id
         )
-    return {"subjects": [dict(r) for r in rows]}
+    return ok({"subjects": [dict(r) for r in rows]})
 
 # ── Classes ───────────────────────────────────────────────────
 
@@ -194,7 +211,7 @@ async def create_class(college_id: str, body: ClassCreate, x_user_id: str = Head
         cid, college_id, body.subject_id, body.name,
         body.google_classroom_id, x_user_id, body.academic_year_id, body.description
     )
-    return {"id": cid, "name": body.name}
+    return ok({"id": cid, "name": body.name})
 
 @app.get("/colleges/{college_id}/classes")
 async def list_classes(college_id: str, subject_id: Optional[str] = None):
@@ -213,7 +230,7 @@ async def list_classes(college_id: str, subject_id: Optional[str] = None):
                WHERE c.college_id=$1 ORDER BY c.name""",
             college_id
         )
-    return {"classes": [dict(r) for r in rows]}
+    return ok({"classes": [dict(r) for r in rows]})
 
 # ── Faculty ───────────────────────────────────────────────────
 
@@ -224,7 +241,7 @@ async def list_faculty(college_id: str):
         "SELECT id, name, email, role, department, is_active, last_login FROM users WHERE college_id=$1 ORDER BY name",
         college_id
     )
-    return {"faculty": [dict(r) for r in rows]}
+    return ok({"faculty": [dict(r) for r in rows]})
 
 @app.patch("/colleges/{college_id}/faculty/{user_id}/role")
 async def update_role(college_id: str, user_id: str, role: str):
@@ -235,7 +252,7 @@ async def update_role(college_id: str, user_id: str, role: str):
         "UPDATE users SET role=$1 WHERE id=$2 AND college_id=$3",
         role, user_id, college_id
     )
-    return {"status": "updated"}
+    return ok({"status": "updated"})
 
 # ── HOD Dashboard ─────────────────────────────────────────────
 
@@ -253,11 +270,11 @@ async def hod_summary(college_id: str, x_user_id: str = Header(...)):
     papers = await pool.fetchval("SELECT COUNT(*) FROM question_papers WHERE college_id=$1", college_id)
     sessions = await pool.fetchval("SELECT COUNT(*) FROM evaluation_sessions WHERE college_id=$1", college_id)
 
-    return {
+    return ok({
         "college_id": college_id,
         "subjects": subjects,
         "classes": classes,
         "faculty": faculty,
         "papers_generated": papers,
         "evaluation_sessions": sessions,
-    }
+    })

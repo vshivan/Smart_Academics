@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && python -c "import nltk; nltk.download('stopwords', quiet=True); nltk.download('punkt', quiet=True)"
 
 COPY shared/monitoring.py ./monitoring.py
+COPY shared/response.py ./response.py
+COPY shared/cache.py ./cache.py
 COPY syllabus-service/ .
 
 RUN chown -R saap:saap /app

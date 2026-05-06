@@ -3,6 +3,9 @@ import os
 import json
 import uuid
 import logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
@@ -42,6 +45,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Question Generation Service", version="1.0.0", lifespan=lifespan)
 generator = QuestionGenerator()
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 
 class GenerateRequest(BaseModel):
     subject_id: str
@@ -62,7 +79,7 @@ class QuestionEditRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "question-service"}
+    return ok({"status": "ok", "service": "question-service"})
 
 
 @app.post("/generate")
@@ -107,28 +124,47 @@ async def generate_paper(
 
         paper_ids.append({"paper_id": paper_id, "set": paper["paper_set"]})
 
-    return {"status": "generated", "papers": paper_ids}
+    return ok({"status": "generated", "papers": paper_ids})
 
 
 @app.get("/papers/{paper_id}")
-async def get_paper(paper_id: str):
+async def get_paper(paper_id: str, x_college_id: str = Header(...)):
     pool = await get_pool()
-    paper = await pool.fetchrow("SELECT * FROM question_papers WHERE id=$1", paper_id)
+    paper = await pool.fetchrow(
+        "SELECT * FROM question_papers WHERE id=$1 AND college_id=$2",
+        paper_id, x_college_id
+    )
     if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
+        raise HTTPException(status_code=404, detail="Paper not found or unauthorized")
 
     questions = await pool.fetch(
         "SELECT * FROM questions WHERE paper_id=$1 ORDER BY order_index", paper_id
     )
-    return {**dict(paper), "questions": [dict(q) for q in questions]}
+    return ok({**dict(paper), "questions": [dict(q) for q in questions]})
 
 
 ALLOWED_FIELDS = {"question_text", "marks", "answer_key"}
 
 @app.patch("/papers/{paper_id}/questions/{question_id}")
-async def edit_question(paper_id: str, question_id: str, body: QuestionEditRequest):
+async def edit_question(
+    paper_id: str,
+    question_id: str,
+    body: QuestionEditRequest,
+    x_college_id: str = Header(...)
+):
     """Faculty can edit questions before finalizing."""
     pool = await get_pool()
+
+    # Verify paper ownership/college first
+    paper = await pool.fetchrow(
+        "SELECT status FROM question_papers WHERE id=$1 AND college_id=$2",
+        paper_id, x_college_id
+    )
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found or unauthorized")
+    if paper["status"] == "finalized":
+        raise HTTPException(status_code=400, detail="Cannot edit a finalized paper")
+
     updates = {k: v for k, v in body.dict().items() if v is not None and k in ALLOWED_FIELDS}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -139,14 +175,21 @@ async def edit_question(paper_id: str, question_id: str, body: QuestionEditReque
         f"UPDATE questions SET {set_clause}, is_edited=TRUE WHERE id=$1 AND paper_id=${len(values)+2}",
         question_id, *values, paper_id,
     )
-    return {"status": "updated"}
+    return ok({"status": "updated"})
 
 
 @app.post("/papers/{paper_id}/finalize")
-async def finalize_paper(paper_id: str, x_user_id: str = Header(...)):
+async def finalize_paper(
+    paper_id: str,
+    x_user_id: str = Header(...),
+    x_college_id: str = Header(...)
+):
     pool = await get_pool()
-    await pool.execute(
-        "UPDATE question_papers SET status='finalized', finalized_at=NOW() WHERE id=$1",
-        paper_id,
+    # Ensure paper belongs to college
+    res = await pool.execute(
+        "UPDATE question_papers SET status='finalized', finalized_at=NOW() WHERE id=$1 AND college_id=$2",
+        paper_id, x_college_id
     )
-    return {"status": "finalized", "paper_id": paper_id}
+    if res == "UPDATE 0":
+         raise HTTPException(status_code=404, detail="Paper not found or unauthorized")
+    return ok({"status": "finalized", "paper_id": paper_id})

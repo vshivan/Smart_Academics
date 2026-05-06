@@ -47,8 +47,6 @@ services:
     build:
       context: ./backend
       dockerfile: syllabus-service/Dockerfile
-    ports:
-      - "8001:8001"
     env_file: .env
     depends_on:
       postgres:
@@ -62,8 +60,6 @@ services:
     build:
       context: ./backend
       dockerfile: knowledge-service/Dockerfile
-    ports:
-      - "8002:8002"
     env_file: .env
     depends_on:
       postgres:
@@ -73,8 +69,6 @@ services:
     build:
       context: ./backend
       dockerfile: question-service/Dockerfile
-    ports:
-      - "8003:8003"
     env_file: .env
     depends_on:
       postgres:
@@ -86,8 +80,6 @@ services:
     build:
       context: ./backend
       dockerfile: evaluation-service/Dockerfile
-    ports:
-      - "8004:8004"
     env_file: .env
     depends_on:
       postgres:
@@ -101,8 +93,6 @@ services:
     build:
       context: ./backend
       dockerfile: analytics-service/Dockerfile
-    ports:
-      - "8005:8005"
     env_file: .env
     depends_on:
       postgres:
@@ -112,8 +102,6 @@ services:
     build:
       context: ./backend
       dockerfile: management-service/Dockerfile
-    ports:
-      - "8006:8006"
     env_file: .env
     depends_on:
       postgres:
@@ -123,8 +111,6 @@ services:
     build:
       context: ./backend
       dockerfile: export-service/Dockerfile
-    ports:
-      - "8007:8007"
     env_file: .env
     depends_on:
       postgres:
@@ -134,8 +120,6 @@ services:
     build:
       context: ./backend
       dockerfile: features-service/Dockerfile
-    ports:
-      - "8008:8008"
     env_file: .env
     depends_on:
       postgres:
@@ -145,8 +129,6 @@ services:
     build:
       context: ./backend
       dockerfile: student-service/Dockerfile
-    ports:
-      - "8009:8009"
     env_file: .env
     depends_on:
       postgres:
@@ -156,8 +138,6 @@ services:
     build:
       context: ./backend
       dockerfile: notification-service/Dockerfile
-    ports:
-      - "8010:8010"
     env_file: .env
     depends_on:
       postgres:
@@ -167,8 +147,6 @@ services:
     build:
       context: ./backend
       dockerfile: advanced-service/Dockerfile
-    ports:
-      - "8011:8011"
     env_file: .env
     depends_on:
       postgres:

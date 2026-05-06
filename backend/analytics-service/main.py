@@ -6,6 +6,9 @@ import csv
 import uuid as uuid_lib
 import json
 import logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Query
@@ -42,10 +45,24 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Analytics Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "analytics-service"}
+    return ok({"status": "ok", "service": "analytics-service"})
 
 
 @app.get("/analytics/{class_id}")
@@ -84,7 +101,7 @@ async def class_analytics(class_id: str):
                 "status": session["status"],
             })
 
-    return {"class_id": class_id, "sessions": stats}
+    return ok({"class_id": class_id, "sessions": stats})
 
 
 @app.get("/analytics/{class_id}/performance")
@@ -133,12 +150,12 @@ async def performance_trends(class_id: str):
         for title, scores in trends.items()
     ]
 
-    return {
+    return ok({
         "class_id": class_id,
         "score_distribution": buckets,
         "assignment_trends": trend_data,
         "total_evaluated": len(rows),
-    }
+    })
 
 
 @app.get("/analytics/{class_id}/submission-stats")
@@ -161,12 +178,12 @@ async def submission_stats(class_id: str):
         if r["submission_time"] and r["deadline"] and r["submission_time"] <= r["deadline"]
     )
     late = len(rows) - on_time
-    return {
+    return ok({
         "class_id": class_id,
         "total": len(rows),
         "on_time": on_time,
         "late": late,
-    }
+    })
 
 
 @app.get("/analytics/{class_id}/export/csv")
@@ -278,13 +295,13 @@ async def bloom_coverage(class_id: str):
             coverage[level]["percentage"] = round(coverage[level]["count"] / total * 100, 1)
 
     missing = [l for l in levels if coverage[l]["count"] == 0]
-    return {
+    return ok({
         "class_id": class_id,
         "coverage": coverage,
         "total_questions": total,
         "missing_levels": missing,
         "coverage_score": round((len(levels) - len(missing)) / len(levels) * 100, 1),
-    }
+    })
 
 
 @app.get("/analytics/{class_id}/student-risk")
@@ -310,9 +327,9 @@ async def student_risk(class_id: str, threshold: float = Query(default=40.0)):
         class_id, threshold
     )
 
-    return {
+    return ok({
         "class_id": class_id,
         "threshold": threshold,
         "at_risk_count": len(rows),
         "students": [dict(r) for r in rows],
-    }
+    })

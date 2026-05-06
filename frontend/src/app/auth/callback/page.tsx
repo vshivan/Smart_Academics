@@ -1,21 +1,32 @@
 "use client";
-import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+/**
+ * OAuth callback page.
+ *
+ * The API gateway redirects here with the token in the URL FRAGMENT (hash):
+ *   /auth/callback#token=<jwt>&user=<url-encoded-json>
+ *
+ * Why hash? Fragments are never sent to the server, so the JWT is not
+ * logged in server access logs. window.location.hash reads it client-side.
+ *
+ * Error case still uses query string:
+ *   /auth/callback?error=<message>
+ */
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { saveSession, type User } from "@/lib/auth";
 
-function CallbackHandler() {
+export default function AuthCallbackPage() {
   const router = useRouter();
-  const params = useSearchParams();
-  const [status, setStatus] = useState("Signing you in...");
+  const [status, setStatus]   = useState("Signing you in…");
   const [isError, setIsError] = useState(false);
 
   useEffect(() => {
-    const token = params.get("token");
-    const userRaw = params.get("user");
-    const error = params.get("error");
+    // Check query string for errors first
+    const queryParams = new URLSearchParams(window.location.search);
+    const error = queryParams.get("error");
 
     if (error) {
       setIsError(true);
-      // Try to parse a friendly message from Google's JSON error body
       try {
         const parsed = JSON.parse(decodeURIComponent(error));
         setStatus(`Login failed: ${parsed.error_description || parsed.error}`);
@@ -25,6 +36,12 @@ function CallbackHandler() {
       return;
     }
 
+    // Token is in the URL hash fragment: #token=...&user=...
+    const hash = window.location.hash.slice(1); // remove leading #
+    const hashParams = new URLSearchParams(hash);
+    const token   = hashParams.get("token");
+    const userRaw = hashParams.get("user");
+
     if (!token) {
       setIsError(true);
       setStatus("No token received from server.");
@@ -32,37 +49,42 @@ function CallbackHandler() {
     }
 
     try {
-      localStorage.setItem("access_token", token);
+      let user: User | null = null;
       if (userRaw) {
-        localStorage.setItem("user", decodeURIComponent(userRaw));
+        user = JSON.parse(decodeURIComponent(userRaw)) as User;
       }
-      setStatus("Login successful! Redirecting...");
+
+      saveSession(token, user ?? { email: "", name: "", role: "faculty" });
+      setStatus("Login successful! Redirecting…");
       router.push("/dashboard");
     } catch {
       setIsError(true);
       setStatus("Failed to save session. Please try again.");
     }
-  }, [params, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div className="text-center">
-      <div className="text-5xl mb-4">{isError ? "❌" : "⏳"}</div>
-      <p className="text-gray-600 text-lg">{status}</p>
-      {isError && (
-        <a href="/" className="mt-6 inline-block text-blue-600 underline">
-          ← Back to home
-        </a>
-      )}
-    </div>
-  );
-}
-
-export default function AuthCallbackPage() {
-  return (
-    <main className="min-h-screen flex items-center justify-center">
-      <Suspense fallback={<p className="text-gray-500">Loading...</p>}>
-        <CallbackHandler />
-      </Suspense>
+    <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-10 max-w-sm w-full text-center">
+        <div className="flex items-center justify-center mb-6">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+            <span className="text-white font-bold text-lg">S</span>
+          </div>
+        </div>
+        <div className="text-5xl mb-4">{isError ? "❌" : "⏳"}</div>
+        <p className="text-gray-600 text-lg">{status}</p>
+        {isError && (
+          <div className="mt-6 space-y-3">
+            <p className="text-sm text-gray-400">
+              Common causes: Google OAuth credentials not configured, or redirect URI mismatch.
+            </p>
+            <a href="/" className="inline-block text-blue-600 underline text-sm">
+              ← Back to home
+            </a>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

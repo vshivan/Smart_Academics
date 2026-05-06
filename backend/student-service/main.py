@@ -6,6 +6,9 @@ Student Portal Service
 - Download certificates
 """
 import os, json, uuid, logging
+import sys, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "shared"))
+from response import ok, fail
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Header
@@ -37,9 +40,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Student Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    import logging as _log
+    _log.getLogger(__name__).error(_tb.format_exc())
+    return JSONResponse(status_code=500, content={"success": False, "data": None, "error": {"code": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred."}, "meta": None})
+
+@app.exception_handler(HTTPException)
+async def _http_exc(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": {"code": "ERROR", "message": exc.detail}, "meta": None})
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "student-service"}
+    return ok({"status": "ok", "service": "student-service"})
 
 
 # ── Student Profile ───────────────────────────────────────────
@@ -52,7 +69,7 @@ async def get_student_profile(student_google_id: str):
     )
     if not row:
         raise HTTPException(404, "Student not found")
-    return dict(row)
+    return ok(dict(row))
 
 
 @app.post("/students/register")
@@ -72,7 +89,7 @@ async def register_student(
                last_login=NOW()""",
         sid, student_google_id, student_email, student_name, college_id
     )
-    return {"id": sid, "student_google_id": student_google_id}
+    return ok({"id": sid, "student_google_id": student_google_id})
 
 
 # ── Student Results ───────────────────────────────────────────
@@ -109,7 +126,7 @@ async def get_student_results(student_google_id: str, college_id: Optional[str] 
     else:
         summary = {"total_assignments": 0, "average_score": 0, "highest_score": 0, "lowest_score": 0}
 
-    return {"results": results, "summary": summary}
+    return ok({"results": results, "summary": summary})
 
 
 @app.get("/students/{student_google_id}/results/{session_id}")
@@ -141,7 +158,7 @@ async def get_student_result_detail(student_google_id: str, session_id: str):
 
     result = dict(row)
     result["rank"] = rank_row["rank"] if rank_row else None
-    return result
+    return ok(result)
 
 
 @app.get("/students/{student_google_id}/classes")
@@ -161,7 +178,7 @@ async def get_student_classes(student_google_id: str):
            ORDER BY c.name""",
         student_google_id
     )
-    return {"classes": [dict(r) for r in rows]}
+    return ok({"classes": [dict(r) for r in rows]})
 
 
 @app.get("/students/{student_google_id}/certificates")
@@ -171,4 +188,4 @@ async def get_student_certificates(student_google_id: str):
         "SELECT * FROM certificates WHERE student_google_id=$1 ORDER BY issued_date DESC",
         student_google_id
     )
-    return {"certificates": [dict(r) for r in rows]}
+    return ok({"certificates": [dict(r) for r in rows]})
