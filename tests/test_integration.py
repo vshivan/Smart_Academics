@@ -34,19 +34,14 @@ pytestmark = pytest.mark.skipif(
 # ── Health checks ─────────────────────────────────────────────
 
 class TestServiceHealth:
+    """
+    Microservices run on the internal Docker network only.
+    They are NOT exposed to the host — the API gateway proxies to them.
+    We test them via the gateway's health endpoint and by checking
+    that the gateway can reach them (503 would mean service is down).
+    """
     SERVICES = [
         ("api-gateway",          "http://localhost:8000/health"),
-        ("syllabus-service",     "http://localhost:8001/health"),
-        ("knowledge-service",    "http://localhost:8002/health"),
-        ("question-service",     "http://localhost:8003/health"),
-        ("evaluation-service",   "http://localhost:8004/health"),
-        ("analytics-service",    "http://localhost:8005/health"),
-        ("management-service",   "http://localhost:8006/health"),
-        ("export-service",       "http://localhost:8007/health"),
-        ("features-service",     "http://localhost:8008/health"),
-        ("student-service",      "http://localhost:8009/health"),
-        ("notification-service", "http://localhost:8010/health"),
-        ("advanced-service",     "http://localhost:8011/health"),
     ]
 
     @pytest.mark.parametrize("name,url", SERVICES)
@@ -54,9 +49,36 @@ class TestServiceHealth:
         r = requests.get(url, timeout=TIMEOUT)
         assert r.status_code == 200, f"{name} returned {r.status_code}"
         data = r.json()
-        # Handle both raw and enveloped responses
         status = data.get("data", {}).get("status") or data.get("status")
         assert status == "ok", f"{name} status is '{status}'"
+
+    def test_all_microservices_reachable_via_gateway(self):
+        """
+        The gateway proxies to all microservices internally.
+        A 403 (auth required) means the service is reachable.
+        A 503 means the service is down.
+        """
+        routes = [
+            "/upload-syllabus",
+            "/generate-paper",
+            "/evaluate-assignment",
+            "/analytics/test-class",
+            "/colleges",
+            "/question-bank",
+            "/students/test/results",
+            "/paper-templates",
+            "/attendance/test",
+            "/accreditation/reports",
+            "/admin/stats",
+            "/schedule/test",
+            "/subjects/test/copo",
+            "/scanner/sessions/test/sheets",
+        ]
+        for route in routes:
+            r = requests.get(f"{BASE}{route}", timeout=TIMEOUT)
+            assert r.status_code != 503, f"Service behind {route} is DOWN (503)"
+            assert r.status_code != 504, f"Service behind {route} TIMED OUT (504)"
+            # 403 = auth required = service is up and reachable
 
 
 # ── Gateway response format ───────────────────────────────────
@@ -96,13 +118,13 @@ class TestOTPAuthFlow:
     def test_otp_request_endpoint_reachable(self):
         r = requests.post(
             f"{BASE}/auth/otp/request",
-            json={"email": "integration-test@saap.test"},
+            json={"email": "integration.test@gmail.com"},
             timeout=TIMEOUT,
         )
-        # Should succeed (200) — OTP logged to console in dev mode
         assert r.status_code == 200
         data = r.json()
         assert data["success"] is True
+        assert "message" in data["data"]
 
     def test_otp_request_invalid_email(self):
         r = requests.post(
@@ -113,9 +135,13 @@ class TestOTPAuthFlow:
         assert r.status_code == 422
 
     def test_otp_verify_wrong_code(self):
+        # First request an OTP so the email exists in otp_codes
+        requests.post(f"{BASE}/auth/otp/request",
+                      json={"email": "verify.test@gmail.com"}, timeout=TIMEOUT)
+        # Now verify with wrong code
         r = requests.post(
             f"{BASE}/auth/otp/verify",
-            json={"email": "integration-test@saap.test", "otp": "000000"},
+            json={"email": "verify.test@gmail.com", "otp": "000000"},
             timeout=TIMEOUT,
         )
         assert r.status_code == 400
@@ -125,7 +151,7 @@ class TestOTPAuthFlow:
     def test_otp_verify_missing_fields(self):
         r = requests.post(
             f"{BASE}/auth/otp/verify",
-            json={"email": "test@test.com"},  # missing otp
+            json={"email": "test@example.com"},  # missing otp
             timeout=TIMEOUT,
         )
         assert r.status_code == 422

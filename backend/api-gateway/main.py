@@ -515,3 +515,44 @@ async def rbac_check(request: Request, user=Depends(get_current_user)):
 @app.get("/rbac/permissions/{role}", dependencies=[Depends(require_admin)])
 async def rbac_permissions(role: str, request: Request, user=Depends(get_current_user)):
     return await proxy_request(request, SERVICES["advanced"], f"/rbac/permissions/{role}", user)
+
+# ── Exam Schedule routes ──────────────────────────────────────
+@app.get("/schedule/{college_id}")
+async def get_schedule(college_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/schedule/{college_id}", user)
+
+@app.post("/schedule/{college_id}")
+async def create_exam_slot(college_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/schedule/{college_id}", user)
+
+@app.delete("/schedule/{college_id}/slots/{slot_id}")
+async def delete_exam_slot(college_id: str, slot_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/schedule/{college_id}/slots/{slot_id}", user)
+
+# ── Audit Log routes ──────────────────────────────────────────
+@app.get("/audit/{college_id}", dependencies=[Depends(require_hod_or_admin)])
+async def get_audit_logs(college_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/audit/{college_id}", user)
+
+# ── Admin Stats route ─────────────────────────────────────────
+@app.get("/admin/stats", dependencies=[Depends(require_admin)])
+async def admin_stats(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/admin/stats", user)
+
+# ── CO-PO Mapping routes ──────────────────────────────────────
+@app.get("/subjects/{subject_id}/copo")
+async def get_copo(subject_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/subjects/{subject_id}/copo", user)
+
+@app.post("/subjects/{subject_id}/copo")
+async def save_copo(subject_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/subjects/{subject_id}/copo", user)
+
+# ── Scanner routes ────────────────────────────────────────────
+@app.get("/scanner/sessions/{session_id}/sheets")
+async def get_scanned_sheets(session_id: str, request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], f"/scanner/sessions/{session_id}/sheets", user)
+
+@app.post("/scanner/upload")
+async def upload_scanned_sheet(request: Request, user=Depends(get_current_user)):
+    return await proxy_request(request, SERVICES["advanced"], "/scanner/upload", user)

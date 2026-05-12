@@ -530,3 +530,240 @@ async def get_role_permissions(role: str):
     pool = await get_pool()
     rows = await pool.fetch("SELECT permission FROM role_permissions WHERE role=$1", role)
     return ok({"role": role, "permissions": [r["permission"] for r in rows]})
+
+
+# ── EXAM SCHEDULE ─────────────────────────────────────────────
+
+class ExamSlot(BaseModel):
+    subject_name: str
+    subject_id: Optional[str] = None
+    exam_type: str = "midterm"
+    exam_date: str
+    start_time: str = "09:00"
+    end_time: str = "12:00"
+    venue: Optional[str] = None
+    invigilator: Optional[str] = None
+
+
+@app.get("/schedule/{college_id}")
+async def get_schedule(college_id: str):
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM exam_schedule WHERE college_id=$1 ORDER BY exam_date, start_time",
+        college_id
+    )
+    return ok({"slots": [dict(r) for r in rows]})
+
+
+@app.post("/schedule/{college_id}")
+async def create_exam_slot(college_id: str, body: ExamSlot, x_user_id: str = Header(...)):
+    pool = await get_pool()
+    sid = str(uuid.uuid4())
+    await pool.execute(
+        """INSERT INTO exam_schedule
+           (id, college_id, subject_name, subject_id, exam_type, exam_date,
+            start_time, end_time, venue, invigilator, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+        sid, college_id, body.subject_name, body.subject_id, body.exam_type,
+        body.exam_date, body.start_time, body.end_time, body.venue,
+        body.invigilator, x_user_id
+    )
+    return ok({"id": sid, "subject_name": body.subject_name})
+
+
+@app.delete("/schedule/{college_id}/slots/{slot_id}")
+async def delete_exam_slot(college_id: str, slot_id: str):
+    pool = await get_pool()
+    await pool.execute(
+        "DELETE FROM exam_schedule WHERE id=$1 AND college_id=$2",
+        slot_id, college_id
+    )
+    return ok({"status": "deleted"})
+
+
+# ── AUDIT LOG ─────────────────────────────────────────────────
+
+@app.get("/audit/{college_id}")
+async def get_audit_logs(
+    college_id: str,
+    search: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
+):
+    pool = await get_pool()
+    offset = (page - 1) * limit
+    filters = ["college_id=$1"]
+    params: list = [college_id]
+    i = 2
+    if search:
+        filters.append(f"(action ILIKE ${i} OR resource_type ILIKE ${i})")
+        params.append(f"%{search}%"); i += 1
+    if resource_type:
+        filters.append(f"resource_type=${i}")
+        params.append(resource_type); i += 1
+
+    where = " AND ".join(filters)
+    total = await pool.fetchval(f"SELECT COUNT(*) FROM audit_logs WHERE {where}", *params)
+    rows = await pool.fetch(
+        f"""SELECT al.*, u.email as user_email
+            FROM audit_logs al
+            LEFT JOIN users u ON al.user_id = u.id
+            WHERE {where}
+            ORDER BY al.created_at DESC
+            LIMIT {limit} OFFSET {offset}""",
+        *params
+    )
+    return ok({"logs": [dict(r) for r in rows], "total": total, "page": page})
+
+
+# ── ADMIN STATS ───────────────────────────────────────────────
+
+@app.get("/admin/stats")
+async def get_admin_stats():
+    """Platform-wide statistics for the super admin panel."""
+    pool = await get_pool()
+    total_colleges    = await pool.fetchval("SELECT COUNT(*) FROM colleges WHERE is_active=TRUE")
+    total_users       = await pool.fetchval("SELECT COUNT(*) FROM users WHERE is_active=TRUE")
+    total_papers      = await pool.fetchval("SELECT COUNT(*) FROM question_papers")
+    total_evaluations = await pool.fetchval("SELECT COUNT(*) FROM evaluation_sessions")
+    total_subjects    = await pool.fetchval("SELECT COUNT(*) FROM subjects")
+    return ok({
+        "total_colleges":    total_colleges,
+        "total_users":       total_users,
+        "total_papers":      total_papers,
+        "total_evaluations": total_evaluations,
+        "total_subjects":    total_subjects,
+    })
+
+
+# ── CO-PO MAPPING ─────────────────────────────────────────────
+
+class COPOMapping(BaseModel):
+    cos: list[dict]   # list of CO objects with po_mapping
+
+
+@app.get("/subjects/{subject_id}/copo")
+async def get_copo_mapping(subject_id: str):
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT mapping_data FROM copo_mappings WHERE subject_id=$1",
+        subject_id
+    )
+    if not row:
+        return ok({"cos": [], "subject_id": subject_id})
+    return ok({"cos": row["mapping_data"].get("cos", []), "subject_id": subject_id})
+
+
+@app.post("/subjects/{subject_id}/copo")
+async def save_copo_mapping(subject_id: str, body: COPOMapping, x_college_id: str = Header(...)):
+    pool = await get_pool()
+    await pool.execute(
+        """INSERT INTO copo_mappings (id, subject_id, college_id, mapping_data, updated_at)
+           VALUES (uuid_generate_v4(), $1, $2, $3::jsonb, NOW())
+           ON CONFLICT (subject_id) DO UPDATE SET
+               mapping_data = EXCLUDED.mapping_data,
+               updated_at   = NOW()""",
+        subject_id, x_college_id, json.dumps({"cos": body.cos})
+    )
+    return ok({"status": "saved", "co_count": len(body.cos)})
+
+
+# ── ANSWER SHEET SCANNER ──────────────────────────────────────
+
+@app.get("/scanner/sessions/{session_id}/sheets")
+async def get_scanned_sheets(session_id: str):
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM scanned_sheets WHERE session_id=$1 ORDER BY uploaded_at DESC",
+        session_id
+    )
+    return ok({"sheets": [dict(r) for r in rows]})
+
+
+@app.post("/scanner/upload")
+async def upload_scanned_sheet(
+    file: UploadFile = File(...),
+    session_id: str = None,
+    answer_key: str = None,
+    total_marks: int = 10,
+    x_college_id: str = Header(default=""),
+):
+    """
+    Upload a scanned answer sheet image/PDF.
+    OCR extracts text, then evaluates against the answer key.
+    """
+    pool = await get_pool()
+    content = await file.read()
+    sheet_id = str(uuid.uuid4())
+
+    # Save file
+    upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
+    save_path = os.path.join(upload_dir, f"scan_{sheet_id}.{ext}")
+    with open(save_path, "wb") as f:
+        f.write(content)
+
+    await pool.execute(
+        """INSERT INTO scanned_sheets
+           (id, session_id, college_id, image_path, processing_status, uploaded_at)
+           VALUES ($1,$2,$3,$4,'pending',NOW())""",
+        sheet_id, session_id, x_college_id, save_path
+    )
+
+    # Process in background
+    import asyncio
+    asyncio.create_task(_process_scanned_sheet(
+        pool, sheet_id, save_path, answer_key or "", total_marks
+    ))
+
+    return ok({"sheet_id": sheet_id, "status": "processing"})
+
+
+async def _process_scanned_sheet(pool, sheet_id: str, image_path: str, answer_key: str, total_marks: int):
+    """OCR the image and evaluate against the answer key."""
+    try:
+        await pool.execute(
+            "UPDATE scanned_sheets SET processing_status='processing' WHERE id=$1", sheet_id
+        )
+
+        # Extract text via OCR
+        ocr_text = ""
+        try:
+            import pytesseract
+            from PIL import Image
+            if image_path.lower().endswith(".pdf"):
+                import pdfplumber
+                with pdfplumber.open(image_path) as pdf:
+                    ocr_text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+            else:
+                img = Image.open(image_path)
+                ocr_text = pytesseract.image_to_string(img)
+        except Exception as e:
+            logger.warning(f"OCR failed for {sheet_id}: {e}")
+            ocr_text = ""
+
+        # Simple keyword-based scoring if answer key provided
+        marks_awarded = 0.0
+        feedback = "OCR text extracted."
+        if answer_key and ocr_text:
+            keywords = [w.strip().lower() for w in answer_key.split() if len(w) > 3]
+            found = sum(1 for kw in keywords if kw in ocr_text.lower())
+            score_ratio = found / len(keywords) if keywords else 0
+            marks_awarded = round(score_ratio * total_marks, 2)
+            feedback = f"Found {found}/{len(keywords)} key concepts. Score: {marks_awarded}/{total_marks}"
+
+        await pool.execute(
+            """UPDATE scanned_sheets SET
+               ocr_text=$1, marks_awarded=$2, feedback=$3,
+               processing_status='done', processed_at=NOW()
+               WHERE id=$4""",
+            ocr_text, marks_awarded, feedback, sheet_id
+        )
+    except Exception as e:
+        logger.error(f"Sheet processing failed {sheet_id}: {e}")
+        await pool.execute(
+            "UPDATE scanned_sheets SET processing_status='failed', processing_error=$1 WHERE id=$2",
+            str(e), sheet_id
+        )

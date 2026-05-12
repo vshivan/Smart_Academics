@@ -7,7 +7,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/00_init.sql
+      - ./backend/db/migrations/001_features.sql:/docker-entrypoint-initdb.d/01_features.sql
+      - ./backend/db/migrations/002_new_features.sql:/docker-entrypoint-initdb.d/02_new_features.sql
+      - ./backend/db/migrations/003_rbac_full.sql:/docker-entrypoint-initdb.d/03_rbac_full.sql
+      - ./backend/db/migrations/004_otp_auth.sql:/docker-entrypoint-initdb.d/04_otp_auth.sql
+      - ./backend/db/migrations/005_missing_tables.sql:/docker-entrypoint-initdb.d/05_missing_tables.sql
     ports:
       - "5432:5432"
     healthcheck:
