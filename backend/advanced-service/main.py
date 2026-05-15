@@ -658,13 +658,14 @@ async def get_copo_mapping(subject_id: str):
 @app.post("/subjects/{subject_id}/copo")
 async def save_copo_mapping(subject_id: str, body: COPOMapping, x_college_id: str = Header(...)):
     pool = await get_pool()
+    mapping_id = str(uuid.uuid4())
     await pool.execute(
         """INSERT INTO copo_mappings (id, subject_id, college_id, mapping_data, updated_at)
-           VALUES (uuid_generate_v4(), $1, $2, $3::jsonb, NOW())
+           VALUES ($1, $2, $3, $4::jsonb, NOW())
            ON CONFLICT (subject_id) DO UPDATE SET
                mapping_data = EXCLUDED.mapping_data,
                updated_at   = NOW()""",
-        subject_id, x_college_id, json.dumps({"cos": body.cos})
+        mapping_id, subject_id, x_college_id, json.dumps({"cos": body.cos})
     )
     return ok({"status": "saved", "co_count": len(body.cos)})
 

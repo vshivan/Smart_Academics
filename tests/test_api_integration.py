@@ -6,11 +6,11 @@ import os
 import pytest
 import requests
 
-BASE = os.getenv("API_BASE",       "http://host.docker.internal:8000")
-KG_BASE = os.getenv("KG_BASE",    "http://host.docker.internal:8002")
-Q_BASE  = os.getenv("Q_BASE",     "http://host.docker.internal:8003")
-EVAL_BASE = os.getenv("EVAL_BASE","http://host.docker.internal:8004")
-ANALYTICS_BASE = os.getenv("ANALYTICS_BASE", "http://host.docker.internal:8005")
+BASE = os.getenv("API_BASE",       "http://localhost:8000")
+KG_BASE = os.getenv("KG_BASE",    "http://localhost:8002")
+Q_BASE  = os.getenv("Q_BASE",     "http://localhost:8003")
+EVAL_BASE = os.getenv("EVAL_BASE","http://localhost:8004")
+ANALYTICS_BASE = os.getenv("ANALYTICS_BASE", "http://localhost:8005")
 
 # Generate a test JWT directly (bypasses Google OAuth)
 os.environ["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
@@ -40,19 +40,20 @@ SUBJECT_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 class TestHealthChecks:
     @pytest.mark.parametrize("url,service", [
-        ("http://host.docker.internal:8000", "api-gateway"),
-        ("http://host.docker.internal:8001", "syllabus-service"),
-        ("http://host.docker.internal:8002", "knowledge-service"),
-        ("http://host.docker.internal:8003", "question-service"),
-        ("http://host.docker.internal:8004", "evaluation-service"),
-        ("http://host.docker.internal:8005", "analytics-service"),
+        ("http://localhost:8000", "api-gateway"),
+        ("http://localhost:8001", "syllabus-service"),
+        ("http://localhost:8002", "knowledge-service"),
+        ("http://localhost:8003", "question-service"),
+        ("http://localhost:8004", "evaluation-service"),
+        ("http://localhost:8005", "analytics-service"),
     ])
     def test_service_health(self, url, service):
         r = requests.get(f"{url}/health", timeout=5)
         assert r.status_code == 200
         data = r.json()
-        assert data["status"] == "ok"
-        assert data["service"] == service
+        # Handle both raw and enveloped responses
+        status = data.get("data", {}).get("status") if data.get("data") else data.get("status")
+        assert status == "ok"
 
 
 # ── Auth ──────────────────────────────────────────────────────

@@ -7,13 +7,36 @@ import { useEffect, Suspense } from "react";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+import { saveSession, decodeToken, type User } from "@/lib/auth";
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const pathname     = usePathname();
   const searchParams = useSearchParams();
-  const { error }    = useToast();
+  const { error, success } = useToast();
   const auth         = useAuth();
   const router       = useRouter();
+
+  // Auto-refresh token if college_id is missing (stale JWT from before college was assigned)
+  useEffect(() => {
+    if (auth.isAuthenticated && !auth.collegeId) {
+      api.post("/auth/refresh").then((resp) => {
+        const newToken: string = resp.data?.access_token;
+        if (newToken) {
+          const payload = decodeToken(newToken);
+          const currentUser = auth.user ?? { email: "", name: "", role: "faculty" as const };
+          saveSession(newToken, {
+            ...currentUser,
+            role: (payload?.role as User["role"]) ?? currentUser.role,
+          });
+          // Reload page to pick up new JWT
+          window.location.reload();
+        }
+      }).catch(() => {
+        // Refresh failed silently — user can log out and back in manually
+      });
+    }
+  }, [auth.isAuthenticated, auth.collegeId]);
 
   // Show toast for permission errors from middleware redirect
   useEffect(() => {

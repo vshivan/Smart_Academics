@@ -57,8 +57,8 @@ INSERT INTO permissions (name, description, category) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ── role_permissions (clean re-seed) ─────────────────────────
--- Drop and recreate to ensure clean state
-TRUNCATE role_permissions;
+-- Use DELETE instead of TRUNCATE to avoid FK constraint issues
+DELETE FROM role_permissions;
 
 INSERT INTO role_permissions (role, permission) VALUES
   -- faculty
